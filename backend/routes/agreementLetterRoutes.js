@@ -15,7 +15,7 @@ router.post('/generate', async (req, res) => {
             return res.status(400).json({ detail: 'Invalid ObjectId' });
         }
 
-        const company = await db.collection('companies').findOne({ _id: new ObjectId(employee_id) });
+        const company = await db.collection('companies').findOne({ _id: new ObjectId(employee_id), tenantOwnerId: String(req.tenantId) });
         if (!company) {
             return res.status(404).json({ detail: 'Company not found' });
         }
@@ -44,7 +44,8 @@ router.post('/generate', async (req, res) => {
             letter_type,
             content: generatedText,
             file_path: null,
-            generated_on: new Date()
+            generated_on: new Date(),
+            tenantOwnerId: String(req.tenantId)
         };
         await db.collection('generated_agreements').insertOne(newLetter);
 

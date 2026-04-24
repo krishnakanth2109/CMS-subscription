@@ -57,7 +57,7 @@ router.post('/', async (req, res) => {
         const db = getDB();
         const body = req.body;
 
-        const existing = await db.collection('companies').findOne({ email: body.email });
+        const existing = await db.collection('companies').findOne({ email: body.email, tenantOwnerId: String(req.tenantId) });
         if (existing) {
             return res.status(400).json({ detail: 'Email already registered' });
         }
@@ -80,8 +80,8 @@ router.post('/', async (req, res) => {
         const newDoc = {
             ...compData,
             status: 'Pending',
-            created_at: new Date(),
-            compensation: { percentage: parseFloat(percentage) }
+            compensation: { percentage: parseFloat(percentage) },
+            tenantOwnerId: String(req.tenantId)
         };
 
         const result = await db.collection('companies').insertOne(newDoc);
@@ -101,7 +101,7 @@ router.get('/', async (req, res) => {
         const skip = parseInt(req.query.skip) || 0;
         const limit = parseInt(req.query.limit) || 100;
 
-        const cursor = db.collection('companies').find().skip(skip).limit(limit);
+        const cursor = db.collection('companies').find({ tenantOwnerId: String(req.tenantId) }).skip(skip).limit(limit);
         const companies = [];
         for await (const doc of cursor) {
             companies.push(sanitizeDoc(fixId(doc)));
@@ -143,7 +143,7 @@ router.get('/:id', async (req, res) => {
             return res.status(400).json({ detail: 'Invalid ObjectId' });
         }
 
-        const company = await db.collection('companies').findOne({ _id: new ObjectId(id) });
+        const company = await db.collection('companies').findOne({ _id: new ObjectId(id), tenantOwnerId: String(req.tenantId) });
         if (!company) {
             return res.status(404).json({ detail: 'Company not found' });
         }
@@ -164,7 +164,7 @@ router.delete('/:id', async (req, res) => {
             return res.status(400).json({ detail: 'Invalid ObjectId' });
         }
 
-        const result = await db.collection('companies').deleteOne({ _id: new ObjectId(id) });
+        const result = await db.collection('companies').deleteOne({ _id: new ObjectId(id), tenantOwnerId: String(req.tenantId) });
         if (result.deletedCount === 0) {
             return res.status(404).json({ detail: 'Company not found' });
         }
@@ -188,7 +188,7 @@ router.put('/:id', async (req, res) => {
             return res.status(400).json({ detail: `Invalid ObjectId: '${id}'` });
         }
 
-        const existing = await db.collection('companies').findOne({ _id: new ObjectId(id) });
+        const existing = await db.collection('companies').findOne({ _id: new ObjectId(id), tenantOwnerId: String(req.tenantId) });
         if (!existing) {
             return res.status(404).json({ detail: 'Company not found' });
         }
@@ -207,7 +207,7 @@ router.put('/:id', async (req, res) => {
         }
 
         await db.collection('companies').updateOne(
-            { _id: new ObjectId(id) },
+            { _id: new ObjectId(id), tenantOwnerId: String(req.tenantId) },
             { $set: updateData }
         );
 
@@ -261,7 +261,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                     continue;
                 }
 
-                const existing = await db.collection('companies').findOne({ email: email });
+                const existing = await db.collection('companies').findOne({ email: email, tenantOwnerId: String(req.tenantId) });
                 if (existing) {
                     errors.push(`Skipped ${email}: Exists`);
                     continue;
@@ -306,7 +306,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                     signature: signatoryName,
                     status: 'Pending',
                     created_at: new Date(),
-                    compensation: { percentage: pct }
+                    compensation: { percentage: pct },
+                    tenantOwnerId: String(req.tenantId)
                 };
 
                 await db.collection('companies').insertOne(doc);

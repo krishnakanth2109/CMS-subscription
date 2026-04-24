@@ -7,12 +7,6 @@ const userSchema = new mongoose.Schema(
     recruiterId: { type: String, unique: true, sparse: true },
 
     // ── SaaS Multi-Tenancy Root ───────────────────────────────────────────────
-    // Manager  → tenantOwnerId: null  (they ARE the tenant root / company owner)
-    // Admin    → tenantOwnerId = Manager's _id
-    // Recruiter→ tenantOwnerId = Manager's _id
-    //
-    // Every other model (Candidate, Job, Client, etc.) stores this same value
-    // so all data is hard-scoped to one company. Never changes after creation.
     tenantOwnerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -35,18 +29,22 @@ const userSchema = new mongoose.Schema(
 
     // ── Manager-specific SaaS fields ──────────────────────────────────────────
     companyName: { type: String, trim: true },
+
     subscriptionPlan: {
       type: String,
       enum: ['Basic', 'Pro', 'Enterprise', 'None'],
       default: 'None',
     },
 
+    // ── Razorpay Subscription Fields ──────────────────────────────────────────
+    subscriptionBilling:   { type: String, enum: ['monthly', 'yearly'], default: 'monthly' },
+    subscriptionExpiresAt: { type: Date, default: null },
+    subscriptionPaymentId: { type: String, default: '' },
+    subscriptionOrderId:   { type: String, default: '' },
+    // For free trial: set when manager registers with Basic plan
+    trialStartedAt:        { type: Date, default: null },
+
     // ── Candidate ID Prefix (Manager-level setting) ───────────────────────────
-    // The Manager sets this once for their entire company.
-    // Format: exactly 4 uppercase letters, e.g. "ACME", "GLOB", "HIRE"
-    // All new candidates created under this tenant will use this prefix:
-    //   ACME-0000001, ACME-0000002 ...
-    // Defaults to 'CAND' if not configured.
     candidatePrefix: {
       type: String,
       uppercase: true,
@@ -74,10 +72,27 @@ const userSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// ── Virtual: is trial expired? ────────────────────────────────────────────────
+userSchema.virtual('isTrialExpired').get(function () {
+  if (this.subscriptionPlan !== 'Basic' || !this.trialStartedAt) return false;
+  const trialEnd = new Date(this.trialStartedAt);
+  trialEnd.setDate(trialEnd.getDate() + 7);
+  return new Date() > trialEnd;
+});
+
+// ── Virtual: days left in current plan ────────────────────────────────────────
+userSchema.virtual('subscriptionDaysLeft').get(function () {
+  if (!this.subscriptionExpiresAt) return null;
+  return Math.max(
+    0,
+    Math.ceil((new Date(this.subscriptionExpiresAt) - new Date()) / (1000 * 60 * 60 * 24))
+  );
+});
+
 // ── Indexes ───────────────────────────────────────────────────────────────────
-userSchema.index({ role: 1, active: 1 });   // role-based queries
-userSchema.index({ firebaseUid: 1 });        // Firebase auth lookup
-userSchema.index({ tenantOwnerId: 1 });      // list all users under a tenant/manager
+userSchema.index({ role: 1, active: 1 });
+userSchema.index({ firebaseUid: 1 });
+userSchema.index({ tenantOwnerId: 1 });
 
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 export default User;

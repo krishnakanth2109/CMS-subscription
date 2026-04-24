@@ -30,6 +30,7 @@ dotenv.config();
 
 import { Router } from 'express';
 import mongoose from 'mongoose';
+import { protect } from '../middleware/authMiddleware.js';
 const router = Router();
 
 function getCollections() {
@@ -429,9 +430,9 @@ router.get("/interview/:interviewId/ai-summary", async (req, res) => {
   });
 });
 
-router.get("/admin/interview/:linkId", async (req, res) => {
+router.get("/admin/interview/:linkId", protect, async (req, res) => {
   const { answers, interviewSessions, interviews: interviewsCollection } = getCollections();
-  const session = await interviewSessions.findOne({ link_id: req.params.linkId });
+  const session = await interviewSessions.findOne({ link_id: req.params.linkId, tenantOwnerId: req.tenantId });
   if (!session) {
     res.status(404).json({ detail: "Session not found" });
     return;
@@ -674,7 +675,7 @@ router.post("/admin/profile", async (req, res) => {
   res.json({ status: "success", message: "Profile updated successfully." });
 });
 
-router.post("/admin/parse-resume", upload.single("file"), async (req, res) => {
+router.post("/admin/parse-resume", protect, upload.single("file"), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ detail: "File is required" });
     return;
@@ -691,7 +692,7 @@ router.post("/admin/parse-resume", upload.single("file"), async (req, res) => {
   });
 });
 
-router.post("/admin/create-session", async (req, res) => {
+router.post("/admin/create-session", protect, async (req, res) => {
   const { interviewSessions } = getCollections();
   const linkId = uuidv4();
   
@@ -711,7 +712,8 @@ router.post("/admin/create-session", async (req, res) => {
     scheduled_time: req.body.scheduled_time || null,
     interview_duration: Number(req.body.interview_duration || 30),
     record_video: req.body.record_video === true || req.body.record_video === 'true', // Issue 3
-    status: "pending"
+    status: "pending",
+    tenantOwnerId: req.tenantId
   });
 
   const linkUrl = `/invite?session_id=${linkId}`;
@@ -740,7 +742,7 @@ router.post("/admin/create-session", async (req, res) => {
 });
 
 // Issue 1: Bulk Create Sessions
-router.post("/admin/bulk-create-sessions", async (req, res) => {
+router.post("/admin/bulk-create-sessions", protect, async (req, res) => {
   const { interviewSessions } = getCollections();
   const candidates = req.body.candidates || [];
   const adminId = req.body.admin_id;
@@ -766,7 +768,8 @@ router.post("/admin/bulk-create-sessions", async (req, res) => {
       scheduled_time: req.body.scheduled_time || null,
       interview_duration: duration,
       record_video: recordVideo,
-      status: "pending"
+      status: "pending",
+      tenantOwnerId: req.tenantId
     };
 
     await interviewSessions.insertOne(session);
@@ -814,10 +817,11 @@ router.get("/session/:linkId", async (req, res) => {
   });
 });
 
-router.get("/admin/sessions", async (req, res) => {
+router.get("/admin/sessions", protect, async (req, res) => {
   try {
     const { interviewSessions } = getCollections();
     const query = req.query.admin_id === 'all' ? {} : { created_by: req.query.admin_id };
+    query.tenantOwnerId = req.tenantId;
 
     if (req.query.start_date || req.query.end_date) {
       query.created_at = {};
@@ -955,7 +959,7 @@ router.post("/complete-session/:linkId", async (req, res) => {
 
 async function updateDecisionHandler(req, res) {
   const { interviewSessions } = getCollections();
-  const session = await interviewSessions.findOne({ link_id: req.body.link_id });
+  const session = await interviewSessions.findOne({ link_id: req.body.link_id, tenantOwnerId: req.tenantId });
 
   if (!session) {
     res.status(404).json({ detail: "Session not found" });
@@ -1003,13 +1007,13 @@ async function updateDecisionHandler(req, res) {
   });
 }
 
-router.post("/admin/update-decision", updateDecisionHandler);
-router.post("/admin/update_decision", updateDecisionHandler);
+router.post("/admin/update-decision", protect, updateDecisionHandler);
+router.post("/admin/update_decision", protect, updateDecisionHandler);
 
-router.delete("/admin/delete-session/:linkId", async (req, res) => {
+router.delete("/admin/delete-session/:linkId", protect, async (req, res) => {
   try {
     const { interviewSessions, interviews: interviewsColl, answers } = getCollections();
-    const session = await interviewSessions.findOne({ link_id: req.params.linkId });
+    const session = await interviewSessions.findOne({ link_id: req.params.linkId, tenantOwnerId: req.tenantId });
     if (!session) return res.status(404).json({ detail: "Session not found" });
 
     // Delete session
@@ -1027,7 +1031,7 @@ router.delete("/admin/delete-session/:linkId", async (req, res) => {
   }
 });
 
-router.post("/admin/delete-sessions", async (req, res) => {
+router.post("/admin/delete-sessions", protect, async (req, res) => {
   try {
     const { link_ids } = req.body;
     if (!Array.isArray(link_ids) || link_ids.length === 0) {
@@ -1037,7 +1041,7 @@ router.post("/admin/delete-sessions", async (req, res) => {
     const { interviewSessions, interviews: interviewsColl, answers } = getCollections();
     
     // Find sessions to get their interview_ids for cleanup
-    const sessions = await interviewSessions.find({ link_id: { $in: link_ids } }).toArray();
+    const sessions = await interviewSessions.find({ link_id: { $in: link_ids }, tenantOwnerId: req.tenantId }).toArray();
     const interviewIds = sessions.map(s => s.interview_id).filter(Boolean);
 
     // Delete the sessions

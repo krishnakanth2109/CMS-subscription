@@ -25,6 +25,19 @@ export const loginUser = async (req, res) => {
       await user.save();
     }
 
+    // Compute trial/subscription expiry for frontend
+    let subscriptionDaysLeft = null;
+    if (user.subscriptionExpiresAt) {
+      subscriptionDaysLeft = Math.max(
+        0,
+        Math.ceil((new Date(user.subscriptionExpiresAt) - new Date()) / (1000 * 60 * 60 * 24))
+      );
+    } else if (user.subscriptionPlan === 'Basic' && user.trialStartedAt) {
+      const trialEnd = new Date(user.trialStartedAt);
+      trialEnd.setDate(trialEnd.getDate() + 7);
+      subscriptionDaysLeft = Math.max(0, Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
+    }
+
     res.json({
       _id: user._id,
       name: fullName(user),
@@ -33,13 +46,15 @@ export const loginUser = async (req, res) => {
       email: user.email,
       username: user.username,
       role: user.role,
-      profilePicture: user.profilePicture || "", // Return image
+      profilePicture: user.profilePicture || "",
       firebaseUid: user.firebaseUid,
       recruiterId: user.recruiterId,
-      // 🔹 New SaaS Fields Injected Here
       tenantOwnerId: user.tenantOwnerId,
       companyName: user.companyName,
       subscriptionPlan: user.subscriptionPlan,
+      subscriptionBilling: user.subscriptionBilling,
+      subscriptionExpiresAt: user.subscriptionExpiresAt,
+      subscriptionDaysLeft,
       phone: user.phone,
     });
   } catch (error) {
@@ -50,7 +65,6 @@ export const loginUser = async (req, res) => {
 // @desc    Register user
 // @route   POST /api/auth/register
 export const registerUser = async (req, res) => {
-  // 🔹 Added new SaaS fields to destructuring
   const { 
     email, password, firstName, lastName, name, username, role, profilePicture,
     companyName, subscriptionPlan, phone, tenantOwnerId 
@@ -69,18 +83,28 @@ export const registerUser = async (req, res) => {
       email, password, displayName: [fName, lName].filter(Boolean).join(' ')
     });
 
+    // Set trial start date for Basic (free tier) registrations
+    const resolvedPlan = subscriptionPlan || 'None';
+    const trialStartedAt = resolvedPlan === 'Basic' ? new Date() : null;
+
+    // For Basic plan, set 7-day expiry; paid plans start with null (set after payment)
+    const subscriptionExpiresAt = resolvedPlan === 'Basic'
+      ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      : null;
+
     const user = await User.create({
       firebaseUid: firebaseUser.uid,
       email, firstName: fName, lastName: lName || '',
       username: username || email.split('@')[0],
       role: role || 'recruiter',
-      profilePicture: profilePicture || "", // Save image
+      profilePicture: profilePicture || "",
       active: true,
-      // 🔹 New SaaS Fields Saved to MongoDB Here
       companyName: companyName || "",
-      subscriptionPlan: subscriptionPlan || "None",
+      subscriptionPlan: resolvedPlan,
       phone: phone || "",
       tenantOwnerId: tenantOwnerId || null,
+      trialStartedAt,
+      subscriptionExpiresAt,
     });
 
     res.status(201).json({ 
@@ -88,9 +112,10 @@ export const registerUser = async (req, res) => {
       name: fullName(user), 
       email: user.email, 
       profilePicture: user.profilePicture,
-      // Return company context for UI updates
       companyName: user.companyName,
-      role: user.role
+      role: user.role,
+      subscriptionPlan: user.subscriptionPlan,
+      subscriptionExpiresAt: user.subscriptionExpiresAt,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -102,6 +127,14 @@ export const registerUser = async (req, res) => {
 export const getUserProfile = async (req, res) => {
   try {
     if (req.user) {
+      let subscriptionDaysLeft = null;
+      if (req.user.subscriptionExpiresAt) {
+        subscriptionDaysLeft = Math.max(
+          0,
+          Math.ceil((new Date(req.user.subscriptionExpiresAt) - new Date()) / (1000 * 60 * 60 * 24))
+        );
+      }
+
       res.json({
         _id: req.user._id,
         username: req.user.username,
@@ -110,12 +143,14 @@ export const getUserProfile = async (req, res) => {
         lastName: req.user.lastName,
         email: req.user.email,
         role: req.user.role,
-        profilePicture: req.user.profilePicture || "", // Return image
+        profilePicture: req.user.profilePicture || "",
         firebaseUid: req.user.firebaseUid,
-        // 🔹 Include SaaS context in profile fetches
         tenantOwnerId: req.user.tenantOwnerId,
         companyName: req.user.companyName,
         subscriptionPlan: req.user.subscriptionPlan,
+        subscriptionBilling: req.user.subscriptionBilling,
+        subscriptionExpiresAt: req.user.subscriptionExpiresAt,
+        subscriptionDaysLeft,
         phone: req.user.phone,
       });
     } else {
@@ -126,7 +161,7 @@ export const getUserProfile = async (req, res) => {
   }
 };
 
-// @desc    Update user profile (Handles Image Edit & Remove)
+// @desc    Update user profile
 // @route   PUT /api/auth/profile
 export const updateUserProfile = async (req, res) => {
   try {
@@ -139,15 +174,8 @@ export const updateUserProfile = async (req, res) => {
       user.lastName = nameParts.slice(1).join(' ') || "";
     }
 
-    if (req.body.email) {
-      user.email = req.body.email;
-    }
-
-    if (req.body.profilePicture !== undefined) {
-      user.profilePicture = req.body.profilePicture;
-    }
-
-    // 🔹 Allow updating phone or company details safely
+    if (req.body.email) user.email = req.body.email;
+    if (req.body.profilePicture !== undefined) user.profilePicture = req.body.profilePicture;
     if (req.body.phone !== undefined) user.phone = req.body.phone;
     if (req.body.companyName !== undefined && user.role === 'manager') {
       user.companyName = req.body.companyName;
@@ -209,19 +237,17 @@ export const forgotPassword = async (req, res) => {
   }
 };
 
-// @desc    Delete user profile (Danger Zone)
+// @desc    Delete user profile
 // @route   DELETE /api/auth/profile
 export const deleteUserProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'User not found.' });
 
-    // 1. Delete from Firebase Authentication
     if (user.firebaseUid) {
       await admin.auth().deleteUser(user.firebaseUid);
     }
 
-    // 2. Delete from MongoDB Database
     await User.findByIdAndDelete(req.user._id);
 
     res.json({ message: 'Account deleted successfully.' });

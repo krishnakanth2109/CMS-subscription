@@ -361,7 +361,7 @@ export default function LandingPage() {
           <div className="border border-border p-8 rounded-3xl flex flex-col">
             <h3 className="text-xl font-bold mb-2">Premium Plan</h3>
             <p className="text-muted-foreground text-sm mb-6">Ideal for enterprises & large-scale</p>
-            <div className="text-4xl font-bold mb-8">₹1999<span className="text-lg text-muted-foreground font-normal">/mo</span></div>
+            <div className="text-4xl font-bold mb-8 text-accent">₹1999<span className="text-lg text-muted-foreground font-normal">/mo</span></div>
             <ul className="space-y-4 mb-8 flex-1">
               {['Unlimited Everything', 'Advanced Analytics', '24/7 Dedicated Support', '100 GB Storage', 'Unlimited Users', 'API Access'].map((feature, i) => (
                 <li key={i} className="flex items-center gap-2 text-sm text-muted-foreground">

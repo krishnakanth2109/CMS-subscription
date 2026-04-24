@@ -24,6 +24,7 @@ import interviewRoutes from './routes/interviewRoutes.js';
 import messageRoutes   from './routes/messageRoutes.js';
 import channelRoutes   from './routes/channelRoutes.js';
 import aiMockRoutes    from './routes/aiMockRoutes.js';
+import paymentRoutes   from './routes/paymentRoutes.js';   // 🔹 NEW
 
 // ── Agreement Module ──────────────────────────────────────────────────────────
 import { connectAgreementDB }   from './config/agreementDatabase.js';
@@ -112,13 +113,11 @@ io.on('connection', (socket) => {
     if (roomId) socket.leave(roomId);
   });
 
-  // Legacy DM
   socket.on('send_message', (data) => {
     if (data.to === 'all') socket.broadcast.emit('receive_message', data);
     else socket.to(data.to).emit('receive_message', data);
   });
 
-  // Channel messages
   socket.on('channel_message', (data) => {
     if (data.channelId) socket.to(`channel_${data.channelId}`).emit('channel_message', data);
   });
@@ -142,15 +141,18 @@ app.use('/api/interviews', interviewRoutes);
 app.use('/api/messages',   messageRoutes);
 app.use('/api/channels',   channelRoutes);
 app.use('/api/ai-mock',    aiMockRoutes);
+app.use('/api/payments',   paymentRoutes);
 
 // Agreement module
-app.use('/agreement-companies', agreementCompanyRoutes);
-app.use('/agreement-letters',   agreementLetterRoutes);
-app.use('/agreement-email',     agreementEmailRoutes);
-app.use('/upload',              agreementUploadRoutes);
+app.use('/agreement-companies', protect, agreementCompanyRoutes);
+app.use('/agreement-letters', protect, agreementLetterRoutes);
+app.use('/agreement-email', protect, agreementEmailRoutes);
+app.use('/upload', protect, agreementUploadRoutes);
 app.use('/api/master',          masterRoutes);
 
-// Legacy fallback routes
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEGACY FALLBACK ROUTES (matches frontend when VITE_API_URL doesn't end in /api)
+// ═══════════════════════════════════════════════════════════════════════════════
 app.use('/auth',       authRoutes);
 app.use('/recruiters', recruiterRoutes);
 app.use('/candidates', candidateRoutes);
@@ -160,6 +162,8 @@ app.use('/interviews', interviewRoutes);
 app.use('/messages',   messageRoutes);
 app.use('/channels',   channelRoutes);
 app.use('/ai-mock',    aiMockRoutes);
+app.use('/payments',   paymentRoutes);    // 🔹 FIXED: Added missing payment fallback
+app.use('/master',     masterRoutes);     // 🔹 FIXED: Added missing master fallback
 app.use('/',           aiMockRoutes);
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -211,7 +215,6 @@ app.get('/api/reports', protect, authorize('admin', 'manager'), async (req, res)
     const hasStatus       = (c, s) => (Array.isArray(c.status) ? c.status : [c.status || '']).includes(s);
     const hasAnyInterview = (c)    => (Array.isArray(c.status) ? c.status : [c.status || '']).some(s => INTERVIEW_STAGES.includes(s));
 
-    // ── All queries SCOPED to tenant ──────────────────────────────────────
     const candidates = await Candidate.find({ tenantOwnerId, ...dateQuery })
       .select('status recruiterId recruiterName createdAt')
       .lean();
@@ -220,14 +223,12 @@ app.get('/api/reports', protect, authorize('admin', 'manager'), async (req, res)
     const totalJoined   = candidates.filter(c => hasStatus(c, 'Joined')).length;
     const conversionNum = totalSelected > 0 ? Math.round((totalJoined / totalSelected) * 100) : 0;
 
-    // Active recruiters in this tenant only
     const activeRecruiters = await User.countDocuments({
       role: 'recruiter',
       active: true,
       $or: [{ tenantOwnerId }, { _id: tenantOwnerId }],
     });
 
-    // Recruiter performance (within this tenant)
     const recruiterMap = new Map();
     for (const c of candidates) {
       const key  = c.recruiterId?.toString() || 'unassigned';
@@ -244,7 +245,6 @@ app.get('/api/reports', protect, authorize('admin', 'manager'), async (req, res)
     const recruiterPerformance = Array.from(recruiterMap.values())
       .sort((a, b) => b.Submissions - a.Submissions);
 
-    // Monthly data — always scoped to tenant
     const MONTHS      = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthlyData = [];
     for (let i = 5; i >= 0; i--) {
@@ -280,7 +280,7 @@ app.get('/api/reports', protect, authorize('admin', 'manager'), async (req, res)
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// GET /api/reports/recruiter — Per-recruiter stats (TENANT-SCOPED)
+// GET /api/reports/recruiter
 // ═══════════════════════════════════════════════════════════════════════════════
 app.get('/api/reports/recruiter', protect, async (req, res) => {
   try {
@@ -292,7 +292,6 @@ app.get('/api/reports/recruiter', protect, async (req, res) => {
       'Final Interview', 'Technical Round', 'Technical Interview', 'HR Round', 'HR Interview', 'Interview',
     ]);
 
-    // Scoped to both tenant AND this recruiter
     const all = await Candidate.find({ tenantOwnerId, recruiterId })
       .select('status createdAt')
       .lean();

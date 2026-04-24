@@ -11,6 +11,26 @@ import {
 
 const AGREEMENT_API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
 
+function getFirebaseToken() {
+  try {
+    const raw = sessionStorage.getItem('currentUser');
+    return raw ? JSON.parse(raw)?.idToken : null;
+  } catch { return null; }
+}
+
+async function apiFetch(url, options = {}) {
+  const token = getFirebaseToken();
+  const isFormData = options.body instanceof FormData;
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...(!isFormData ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      ...options.headers,
+    }
+  });
+}
+
 export default function AgreementGenerator() {
   // ─── AGREEMENT STATE ───
   const [companies, setCompanies] = useState([]);
@@ -32,9 +52,18 @@ export default function AgreementGenerator() {
   // ─── DATA FETCHING ───
   const fetchCompanies = () => {
     setLoading(true);
-    fetch(`${AGREEMENT_API}/agreement-companies/`)
+    apiFetch(`${AGREEMENT_API}/agreement-companies/`)
       .then(res => res.json())
-      .then(data => { setCompanies(data || []); setLoading(false); })
+      .then(data => { 
+        if (!Array.isArray(data)) {
+          console.error("Backend Error:", data); 
+          if (data?.detail) alert(`Backend Error: ${data.detail}`);
+          setCompanies([]); 
+        } else {
+          setCompanies(data); 
+        }
+        setLoading(false); 
+      })
       .catch(() => setLoading(false));
   };
 
@@ -45,9 +74,8 @@ export default function AgreementGenerator() {
   // ────────── HANDLERS ──────────
   const handleSaveCompany = (data) => {
     const isEdit = !!selectedCompanyForEdit;
-    fetch(`${AGREEMENT_API}/agreement-companies/${isEdit ? selectedCompanyForEdit.id : ''}`, {
+    apiFetch(`${AGREEMENT_API}/agreement-companies/${isEdit ? selectedCompanyForEdit.id : ''}`, {
       method: isEdit ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     }).then(async res => {
       if (res.ok) { setIsCompanyModalOpen(false); setSelectedCompanyForEdit(null); fetchCompanies(); }
@@ -60,7 +88,7 @@ export default function AgreementGenerator() {
 
   const handleDeleteCompany = async (id) => {
     if (!confirm("Delete this company?")) return;
-    await fetch(`${AGREEMENT_API}/agreement-companies/${id}`, { method: 'DELETE' });
+    await apiFetch(`${AGREEMENT_API}/agreement-companies/${id}`, { method: 'DELETE' });
     fetchCompanies();
   };
 
@@ -83,17 +111,15 @@ export default function AgreementGenerator() {
       if (!co) continue;
       setBulkProgress(`Processing ${++count}/${idsArray.length}: ${co.name}`);
       try {
-        const genRes = await fetch(`${AGREEMENT_API}/agreement-letters/generate`, {
+        const genRes = await apiFetch(`${AGREEMENT_API}/agreement-letters/generate`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ employee_id: id, letter_type: "Agreement", company_name: company })
         });
         const genData = await genRes.json();
         const contentWithoutHeader = genData.content.replace(/<div style="text-align: center; border-bottom: 2px solid #0056b3;[\s\S]*?<\/div>/i, '');
         const pdfDataUri = await generatePdfWithTemplate(contentWithoutHeader, template);
-        await fetch(`${AGREEMENT_API}/agreement-email/send`, {
+        await apiFetch(`${AGREEMENT_API}/agreement-email/send`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             employee_id: id,
             letter_content: genData.content,
@@ -269,7 +295,7 @@ export default function AgreementGenerator() {
         <button onClick={() => document.getElementById('agImportFile').click()} style={{ background: 'var(--ag-success-text)', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '10px', fontWeight: 600, fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}><Upload size={14} /> Import</button>
         <input type="file" id="agImportFile" style={{ display: 'none' }} onChange={async e => {
           const fd = new FormData(); fd.append('file', e.target.files[0]);
-          await fetch(`${AGREEMENT_API}/agreement-companies/upload`, { method: 'POST', body: fd });
+          await apiFetch(`${AGREEMENT_API}/agreement-companies/upload`, { method: 'POST', body: fd, headers: {} });
           fetchCompanies();
         }} />
       </div>

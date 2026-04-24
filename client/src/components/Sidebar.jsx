@@ -1,84 +1,154 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { 
   LayoutDashboard, UserPlus, Briefcase, 
   Building2, Receipt, ClipboardList, MessageSquare, 
   BarChart3, Settings, Power, User, Users, Calendar,
-  Video, FileText, Handshake // <-- Added Handshake icon
+  Video, FileText, Handshake, Lock, Zap, Crown, Sparkles,
+  ChevronRight, AlertTriangle
 } from 'lucide-react';
 import clsx from 'clsx';
+import UpgradePlanModal from './UpgradePlanModal';
+
+// ── Plan feature gate config ──────────────────────────────────────────────────
+// 'all'  = visible to all plans
+// 'pro'  = Pro + Enterprise only
+// 'enterprise' = Enterprise only
+const ROUTE_ACCESS = {
+  '/admin':                  'all',
+  '/admin/add-candidate':    'all',
+  '/admin/my-candidates':    'all',
+  '/admin/recruiters':       'all',
+  '/admin/requirements':     'all',
+  '/admin/schedules':        'all',
+  '/admin/settings':         'all',
+  '/admin/clients':          'pro',
+  '/admin/reports':          'pro',
+  '/admin/invoices':         'enterprise',
+  '/admin/messages':         'enterprise',
+  '/admin/agreements':       'enterprise',
+  '/admin/mock':             'enterprise',
+  '/recruiter':              'all',
+  '/recruiter/candidates':   'all',
+  '/recruiter/assignments':  'all',
+  '/recruiter/schedules':    'all',
+  '/recruiter/profile':      'all',
+  '/recruiter/settings':     'all',
+  '/recruiter/messages':     'enterprise',
+  '/recruiter/mock':         'enterprise',
+  '/recruiter/reports':      'pro',
+};
+
+const planLevel = (plan) => {
+  if (plan === 'Enterprise') return 3;
+  if (plan === 'Pro')        return 2;
+  return 1; // Basic / None / trial
+};
+
+const requiredLevel = (access) => {
+  if (access === 'enterprise') return 3;
+  if (access === 'pro')        return 2;
+  return 1;
+};
+
+const isLocked = (path, plan) => {
+  const access = ROUTE_ACCESS[path];
+  if (!access || access === 'all') return false;
+  return planLevel(plan) < requiredLevel(access);
+};
+
+const lockLabel = (path) => {
+  const access = ROUTE_ACCESS[path];
+  if (access === 'enterprise') return 'Premium';
+  if (access === 'pro')        return 'Flexi+';
+  return null;
+};
 
 export default function Sidebar({ isOpen, toggleSidebar }) {
   const { userRole, logout, currentUser } = useAuth();
   
-  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showLogoutModal,  setShowLogoutModal]  = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+  const currentPlan = currentUser?.subscriptionPlan || 'Basic';
+  const daysLeft    = currentUser?.subscriptionDaysLeft ?? null;
+  const isExpired   = daysLeft !== null && daysLeft === 0;
+  const showBanner  = isExpired || (currentPlan === 'Basic' && daysLeft !== null && daysLeft <= 7);
   
-  const sidebarBg = "bg-[#283086]"; 
-  const mainBackgroundColor = "#f3f6fd"; 
-  const activeBgClass = "bg-[#f3f6fd]"; 
-  const activeTextClass = "text-[#283086] font-extrabold"; 
-  const inactiveTextClass = "text-white font-medium hover:bg-white/10";
+  const sidebarBg        = "bg-[#283086]"; 
+  const mainBg           = "#f3f6fd"; 
+  const activeBgClass    = "bg-[#f3f6fd]"; 
+  const activeTextClass  = "text-[#283086] font-extrabold"; 
+  const inactiveText     = "text-white font-medium hover:bg-white/10";
 
   // Manager links
   const managerLinks = [
-    { name: 'Dashboard',          path: '/admin',                   icon: LayoutDashboard },
-    { name: 'OverAll Candidates', path: '/admin/add-candidate',     icon: Users }, 
-    { name: 'Recruiters',         path: '/admin/recruiters',        icon: Briefcase },
-    { name: 'Client Info',        path: '/admin/clients',           icon: Building2 },
-    { name: 'Invoices',           path: '/admin/invoices',          icon: Receipt },
-    { name: 'Requirements',       path: '/admin/requirements',      icon: ClipboardList },
-    { name: 'Schedules',          path: '/admin/schedules',         icon: Calendar },
-    { name: 'Messages',           path: '/admin/messages',          icon: MessageSquare },
-    { name: 'Agreements',          path: '/admin/agreements',        icon: Handshake },
-    { name: 'Mock Interviews',    path: '/admin/mock',              icon: Video },
-    // { name: 'Offer Letters',      isExternal: true, url: 'https://automated-offer-letter-generator-mocha.vercel.app/?jr_id=l_4387424181',     icon: FileText }, 
-
-    { name: 'Reports',            path: '/admin/reports',           icon: BarChart3 },
-    { name: 'Settings',           path: '/admin/settings',          icon: Settings }, 
+    { name: 'Dashboard',          path: '/admin',                icon: LayoutDashboard },
+    { name: 'OverAll Candidates', path: '/admin/add-candidate',  icon: Users }, 
+    { name: 'Recruiters',         path: '/admin/recruiters',     icon: Briefcase },
+    { name: 'Client Info',        path: '/admin/clients',        icon: Building2 },
+    { name: 'Invoices',           path: '/admin/invoices',       icon: Receipt },
+    { name: 'Requirements',       path: '/admin/requirements',   icon: ClipboardList },
+    { name: 'Schedules',          path: '/admin/schedules',      icon: Calendar },
+    { name: 'Messages',           path: '/admin/messages',       icon: MessageSquare },
+    { name: 'Agreements',         path: '/admin/agreements',     icon: Handshake },
+    { name: 'Mock Interviews',    path: '/admin/mock',           icon: Video },
+    { name: 'Reports',            path: '/admin/reports',        icon: BarChart3 },
+    { name: 'Settings',           path: '/admin/settings',       icon: Settings }, 
   ];
 
-  // Recruiter links
+  const adminLinks = [
+    { name: 'Dashboard',          path: '/admin',               icon: LayoutDashboard },
+    { name: 'OverAll Candidates', path: '/admin/add-candidate', icon: Users },
+    { name: 'My Candidates',      path: '/admin/my-candidates', icon: UserPlus },
+    { name: 'Recruiters',         path: '/admin/recruiters',    icon: Briefcase },
+    { name: 'Requirements',       path: '/admin/requirements',  icon: ClipboardList },
+    { name: 'Schedules',          path: '/admin/schedules',     icon: Calendar },
+    { name: 'Messages',           path: '/admin/messages',      icon: MessageSquare },
+    { name: 'Agreements',         path: '/admin/agreements',    icon: Handshake },
+    { name: 'Mock Interviews',    path: '/admin/mock',          icon: Video },
+    { name: 'Reports',            path: '/admin/reports',       icon: BarChart3 },
+    { name: 'Settings',           path: '/admin/settings',      icon: Settings },
+  ];
+
   const recruiterLinks = [
-    { name: 'Dashboard',    path: '/recruiter',            icon: LayoutDashboard },
-    { name: 'My Candidates',path: '/recruiter/candidates', icon: UserPlus },
-    { name: 'Assignments',  path: '/recruiter/assignments',icon: Briefcase },
-    { name: 'Schedules',    path: '/recruiter/schedules',  icon: Calendar },
-    { name: 'Messages',     path: '/recruiter/messages',   icon: MessageSquare },
-    { name: 'Mock Interviews', path: '/recruiter/mock',     icon: Video },
-    { name: 'Reports',      path: '/recruiter/reports',    icon: BarChart3 },
-    { name: 'My Profile',   path: '/recruiter/profile',    icon: User },
-    { name: 'Settings',     path: '/recruiter/settings',   icon: Settings },
+    { name: 'Dashboard',       path: '/recruiter',            icon: LayoutDashboard },
+    { name: 'My Candidates',   path: '/recruiter/candidates', icon: UserPlus },
+    { name: 'Assignments',     path: '/recruiter/assignments',icon: Briefcase },
+    { name: 'Schedules',       path: '/recruiter/schedules',  icon: Calendar },
+    { name: 'Messages',        path: '/recruiter/messages',   icon: MessageSquare },
+    { name: 'Mock Interviews', path: '/recruiter/mock',       icon: Video },
+    { name: 'Reports',         path: '/recruiter/reports',    icon: BarChart3 },
+    { name: 'My Profile',      path: '/recruiter/profile',    icon: User },
+    { name: 'Settings',        path: '/recruiter/settings',   icon: Settings },
   ];
 
-  let links = [];
-  if (userRole === 'manager') {
-    links = managerLinks;
-  } else if (userRole === 'admin') {
-    links = [
-      { name: 'Dashboard',          path: '/admin',               icon: LayoutDashboard },
-      { name: 'OverAll Candidates', path: '/admin/add-candidate', icon: Users },
-      { name: 'My Candidates',      path: '/admin/my-candidates', icon: UserPlus },
-      { name: 'Recruiters',         path: '/admin/recruiters',    icon: Briefcase },
-      { name: 'Requirements',       path: '/admin/requirements',  icon: ClipboardList },
-      { name: 'Schedules',          path: '/admin/schedules',     icon: Calendar },
-      { name: 'Messages',           path: '/admin/messages',      icon: MessageSquare },
-      { name: 'Agreements',       path: '/admin/agreements',    icon: Handshake },
-      { name: 'Mock Interviews',    path: '/admin/mock',          icon: Video },
-      // { name: 'Offer Letters',      isExternal: true, url: 'https://automated-offer-letter-generator-mocha.vercel.app/?jr_id=l_4387424181',     icon: FileText }, 
+  let links = recruiterLinks;
+  if (userRole === 'manager') links = managerLinks;
+  else if (userRole === 'admin') links = adminLinks;
 
-      { name: 'Reports',            path: '/admin/reports',       icon: BarChart3 },
-      { name: 'Settings',           path: '/admin/settings',      icon: Settings },
-    ];
-  } else {
-    links = recruiterLinks;
-  }
+  const PlanIcon = useMemo(() => {
+    if (currentPlan === 'Enterprise') return Crown;
+    if (currentPlan === 'Pro')        return Zap;
+    return Sparkles;
+  }, [currentPlan]);
+
+  const planColor = useMemo(() => {
+    if (currentPlan === 'Enterprise') return 'text-amber-400';
+    if (currentPlan === 'Pro')        return 'text-blue-300';
+    return 'text-slate-300';
+  }, [currentPlan]);
 
   return (
     <>
-      <div className={clsx("flex flex-col h-screen fixed left-0 top-0 z-40 transition-all duration-300", sidebarBg, isOpen ? "w-80" : "w-20")}>
+      <div className={clsx(
+        "flex flex-col h-screen fixed left-0 top-0 z-40 transition-all duration-300",
+        sidebarBg,
+        isOpen ? "w-80" : "w-20"
+      )}>
         
-        {/* --- Toggle Button --- */}
+        {/* Toggle Button */}
         <button 
           onClick={toggleSidebar} 
           className="absolute -right-4 top-12 bg-white text-[#283086] rounded-lg p-1.5 shadow-md z-50 border border-gray-200 hover:bg-gray-50 transition-colors"
@@ -99,25 +169,32 @@ export default function Sidebar({ isOpen, toggleSidebar }) {
           )}
         </button>
 
-        {/* --- Header / Logo --- */}
+        {/* Header / Logo */}
         <div className={clsx("h-28 flex items-center transition-all duration-300", isOpen ? "px-8" : "justify-center px-0")}>
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-white/10 backdrop-blur-sm rounded-xl flex items-center justify-center flex-shrink-0 border border-white/10">
               <span className="text-white font-extrabold text-2xl">V</span>
             </div>
-            <span className={clsx("text-white font-bold text-2xl tracking-tight transition-opacity", isOpen ? "opacity-100 block" : "opacity-0 hidden")}>VTS Tracker</span>
+            <span className={clsx("text-white font-bold text-2xl tracking-tight transition-opacity", isOpen ? "opacity-100 block" : "opacity-0 hidden")}>
+              VTS Tracker
+            </span>
           </div>
         </div>
 
-        {/* --- User Profile Card --- */}
+        {/* User Profile Card */}
         <div className={clsx("mb-2 transition-all duration-300", isOpen ? "px-6" : "px-2")}>
           <div className={clsx("bg-white/10 backdrop-blur-md rounded-full flex items-center overflow-hidden border border-white/10 transition-all", isOpen ? "p-3 gap-4" : "p-2 justify-center")}>
             <div className="w-10 h-10 rounded-full border-2 border-white/20 flex-shrink-0 overflow-hidden bg-gray-200">
-               {currentUser?.profilePicture ? <img src={currentUser.profilePicture} className="w-full h-full object-cover" alt="Profile" /> : <User className="h-full w-full p-2 text-gray-500" />}
+              {currentUser?.profilePicture
+                ? <img src={currentUser.profilePicture} className="w-full h-full object-cover" alt="Profile" />
+                : <User className="h-full w-full p-2 text-gray-500" />
+              }
             </div>
             {isOpen && (
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-white truncate">{currentUser?.name || currentUser?.username || currentUser?.email || 'User'}</p>
+                <p className="text-sm font-bold text-white truncate">
+                  {currentUser?.name || currentUser?.username || currentUser?.email || 'User'}
+                </p>
                 <p className="text-[10px] text-blue-200 uppercase font-bold tracking-wider">
                   {userRole === 'admin' ? 'Admin' : userRole === 'manager' ? 'Manager' : 'Recruiter'} Account
                 </p>
@@ -126,32 +203,96 @@ export default function Sidebar({ isOpen, toggleSidebar }) {
           </div>
         </div>
 
-        {/* --- Navigation Links --- */}
-        <div className={clsx("flex-1 overflow-y-auto space-y-1 pt-8 pb-8 pr-0 relative [&::-webkit-scrollbar]:hidden", isOpen ? "pl-6" : "pl-2")}>
+        {/* Plan Badge (only for manager) */}
+        {userRole === 'manager' && (
+          <div className={clsx("transition-all duration-300 mb-1", isOpen ? "px-6" : "px-2")}>
+            <button
+              onClick={() => setShowUpgradeModal(true)}
+              className={clsx(
+                "w-full flex items-center bg-white/5 hover:bg-white/15 border border-white/10 rounded-xl transition-all group",
+                isOpen ? "px-3 py-2 gap-2" : "justify-center p-2"
+              )}
+            >
+              <PlanIcon className={clsx("w-4 h-4 flex-shrink-0", planColor)} />
+              {isOpen && (
+                <>
+                  <div className="flex-1 text-left">
+                    <p className={clsx("text-xs font-bold", planColor)}>
+                      {currentPlan === 'Basic' ? 'Free Trial' : currentPlan === 'Pro' ? 'Flexi Plan' : 'Premium Plan'}
+                    </p>
+                    {daysLeft !== null && (
+                      <p className="text-[10px] text-white/50">
+                        {daysLeft === 0 ? '⚠ Expired' : `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`}
+                      </p>
+                    )}
+                  </div>
+                  <ChevronRight className="w-3 h-3 text-white/40 group-hover:text-white/70 transition-colors" />
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Trial expiry / upgrade banner */}
+        {isOpen && showBanner && userRole === 'manager' && (
+          <div className="mx-6 mb-2 p-2.5 bg-amber-500/20 border border-amber-400/30 rounded-xl flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-amber-300 text-[11px] font-bold">
+                {isExpired ? 'Trial Expired' : `Trial ends in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`}
+              </p>
+              <button
+                onClick={() => setShowUpgradeModal(true)}
+                className="text-[10px] text-amber-200 underline hover:text-white transition-colors"
+              >
+                Upgrade now →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Navigation Links */}
+        <div className={clsx(
+          "flex-1 overflow-y-auto space-y-1 pt-4 pb-8 pr-0 relative [&::-webkit-scrollbar]:hidden",
+          isOpen ? "pl-6" : "pl-2"
+        )}>
           {links.map((link) => {
-            // Handle External Links (Opens in new tab)
-            if (link.isExternal) {
+            const locked = isLocked(link.path, currentPlan);
+            const badge  = lockLabel(link.path);
+
+            // Locked item — show as disabled with lock icon + upgrade hint
+            if (locked) {
               return (
-                <a
-                  key={link.name}
-                  href={link.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  key={link.path}
+                  onClick={() => setShowUpgradeModal(true)}
                   className={clsx(
-                    "group flex items-center relative py-4 select-none outline-none focus:outline-none focus:ring-0",
-                    `${inactiveTextClass} transition-colors duration-200`,
-                    isOpen ? "pl-8 rounded-l-[40px]" : "justify-center pl-0 rounded-xl mx-2"
+                    "group flex items-center relative py-4 w-full text-white/35 hover:text-white/60 hover:bg-white/5 transition-all",
+                    isOpen ? "pl-8 rounded-l-[40px] gap-5" : "justify-center pl-0 rounded-xl mx-2"
                   )}
                 >
-                  <div className={clsx("flex items-center z-20 relative", isOpen ? "gap-5" : "gap-0")}>
-                    <link.icon className="h-5 w-5 stroke-[2.5px]" />
-                    {isOpen && <span className="text-[15px] tracking-wide whitespace-nowrap">{link.name}</span>}
-                  </div>
-                </a>
+                  <link.icon className="h-5 w-5 stroke-[2px] flex-shrink-0" />
+                  {isOpen && (
+                    <>
+                      <span className="text-[15px] tracking-wide whitespace-nowrap flex-1 text-left">{link.name}</span>
+                      <div className="flex items-center gap-1 mr-3">
+                        <Lock className="w-3 h-3" />
+                        <span className="text-[9px] font-bold uppercase tracking-wider bg-white/10 px-1.5 py-0.5 rounded-full">
+                          {badge}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                  {!isOpen && (
+                    <div className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 rounded-full flex items-center justify-center">
+                      <Lock className="w-2.5 h-2.5 text-white" />
+                    </div>
+                  )}
+                </button>
               );
             }
 
-            // Handle Internal React Router Links
+            // Normal NavLink
             return (
               <NavLink
                 key={link.path}
@@ -162,7 +303,7 @@ export default function Sidebar({ isOpen, toggleSidebar }) {
                     "group flex items-center relative py-4 select-none outline-none focus:outline-none focus:ring-0",
                     isActive
                       ? `${activeBgClass} ${activeTextClass}`
-                      : `${inactiveTextClass} transition-colors duration-200`,
+                      : `${inactiveText} transition-colors duration-200`,
                     isOpen ? "pl-8 rounded-l-[40px]" : "justify-center pl-0 rounded-xl mx-2"
                   )
                 }
@@ -173,25 +314,16 @@ export default function Sidebar({ isOpen, toggleSidebar }) {
                       <>
                         <div
                           className="absolute right-0 -top-[30px] w-[30px] h-[30px] bg-transparent pointer-events-none"
-                          style={{
-                            borderBottomRightRadius: '30px',
-                            boxShadow: `15px 15px 0 15px ${mainBackgroundColor}`,
-                          }}
+                          style={{ borderBottomRightRadius: '30px', boxShadow: `15px 15px 0 15px ${mainBg}` }}
                         />
                         <div
                           className="absolute right-0 -bottom-[30px] w-[30px] h-[30px] bg-transparent pointer-events-none"
-                          style={{
-                            borderTopRightRadius: '30px',
-                            boxShadow: `15px -15px 0 15px ${mainBackgroundColor}`,
-                          }}
+                          style={{ borderTopRightRadius: '30px', boxShadow: `15px -15px 0 15px ${mainBg}` }}
                         />
                       </>
                     )}
                     <div className={clsx("flex items-center z-20 relative", isOpen ? "gap-5" : "gap-0")}>
-                      <link.icon className={clsx(
-                        "h-5 w-5",
-                        isActive ? "scale-110 stroke-[3px]" : "stroke-[2.5px]"
-                      )} />
+                      <link.icon className={clsx("h-5 w-5", isActive ? "scale-110 stroke-[3px]" : "stroke-[2.5px]")} />
                       {isOpen && <span className="text-[15px] tracking-wide whitespace-nowrap">{link.name}</span>}
                     </div>
                   </>
@@ -201,11 +333,14 @@ export default function Sidebar({ isOpen, toggleSidebar }) {
           })}
         </div>
 
-        {/* --- Sign Out Button --- */}
+        {/* Sign Out Button */}
         <div className={clsx("mt-auto p-4 mb-4", isOpen ? "px-6" : "px-2")}>
           <button 
             onClick={() => setShowLogoutModal(true)} 
-            className={clsx("flex items-center w-full bg-red-600 hover:bg-red-700 text-white py-4 gap-4 transition-all shadow-lg", isOpen ? "rounded-2xl px-8" : "rounded-xl justify-center")}
+            className={clsx(
+              "flex items-center w-full bg-red-600 hover:bg-red-700 text-white py-4 gap-4 transition-all shadow-lg",
+              isOpen ? "rounded-2xl px-8" : "rounded-xl justify-center"
+            )}
           >
             <Power className="h-6 w-6 flex-shrink-0" />
             {isOpen && <span className="font-extrabold whitespace-nowrap">Sign Out</span>}
@@ -213,7 +348,7 @@ export default function Sidebar({ isOpen, toggleSidebar }) {
         </div>
       </div>
 
-      {/* --- Logout Confirmation Modal --- */}
+      {/* Logout Modal */}
       {showLogoutModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -241,6 +376,13 @@ export default function Sidebar({ isOpen, toggleSidebar }) {
           </div>
         </div>
       )}
+
+      {/* Upgrade Plan Modal */}
+      <UpgradePlanModal
+        isOpen={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        currentPlan={currentPlan}
+      />
     </>
   );
 }

@@ -39,11 +39,32 @@ router.post('/', async (req, res) => {
     }
 
     const tenantOwnerId = getTenantOwnerId(req.user);
-    const job = await Job.create({
-      ...req.body,
-      tenantOwnerId,
-      createdBy: req.user._id,
-    });
+    //  const job = await Job.create({
+    //   ...req.body,
+    //   tenantOwnerId,
+    //   createdBy: req.user._id,
+    // });
+    const jobData = { ...req.body, createdBy: req.user._id, tenantOwnerId };
+
+    if (!jobData.tatTime || jobData.tatTime === '') jobData.tatTime = null;
+
+    // Auto-increment jobCode scoped to THIS tenant
+    const allJobs = await Job.find(
+      { tenantOwnerId, jobCode: { $regex: /^REQ\d+$/ } },
+      { jobCode: 1 }
+    ).lean();
+
+    let maxNum = 0;
+    if (allJobs.length > 0) {
+      const nums = allJobs.map(j => {
+        const m = j.jobCode.match(/\d+/);
+        return m ? parseInt(m[0], 10) : 0;
+      });
+      maxNum = Math.max(...nums);
+    }
+    jobData.jobCode = `REQ${String(maxNum + 1).padStart(4, '0')}`;
+
+    const job = await Job.create(jobData);
     res.status(201).json(job);
   } catch (error) {
     res.status(400).json({ message: error.message });
@@ -59,6 +80,7 @@ router.put('/:id', async (req, res) => {
 
     const tenantOwnerId = getTenantOwnerId(req.user);
     const updateData = { ...req.body };
+    if (updateData.tatTime === '') updateData.tatTime = null;
     delete updateData.tenantOwnerId; // never allow tenant hop
 
     const job = await Job.findOneAndUpdate(

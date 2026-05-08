@@ -1,13 +1,11 @@
+
 import User from '../models/User.js';
 import { admin } from '../middleware/authMiddleware.js';
 import { sendBrevoEmail } from '../services/email.js';
 
-// Helper: derive a display "name" from User document.
 const fullName = (user) =>
   [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username || user.email;
 
-// @desc    Login user
-// @route   POST /api/auth/login
 export const loginUser = async (req, res) => {
   const { idToken } = req.body;
   if (!idToken) return res.status(400).json({ message: 'Firebase ID token is required.' });
@@ -25,17 +23,21 @@ export const loginUser = async (req, res) => {
       await user.save();
     }
 
-    // Compute trial/subscription expiry for frontend
     let subscriptionDaysLeft = null;
     if (user.subscriptionExpiresAt) {
-      subscriptionDaysLeft = Math.max(
-        0,
-        Math.ceil((new Date(user.subscriptionExpiresAt) - new Date()) / (1000 * 60 * 60 * 24))
-      );
+      subscriptionDaysLeft = Math.max(0, Math.ceil((new Date(user.subscriptionExpiresAt) - new Date()) / (1000 * 60 * 60 * 24)));
     } else if (user.subscriptionPlan === 'Basic' && user.trialStartedAt) {
       const trialEnd = new Date(user.trialStartedAt);
       trialEnd.setDate(trialEnd.getDate() + 7);
       subscriptionDaysLeft = Math.max(0, Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
+    }
+
+    let candidateSettings = user.candidateSettings || { hiddenFields: [], customFields: [] };
+    if (user.role !== 'manager' && user.tenantOwnerId) {
+      const manager = await User.findById(user.tenantOwnerId).select('candidateSettings');
+      if (manager && manager.candidateSettings) {
+        candidateSettings = manager.candidateSettings;
+      }
     }
 
     res.json({
@@ -56,14 +58,13 @@ export const loginUser = async (req, res) => {
       subscriptionExpiresAt: user.subscriptionExpiresAt,
       subscriptionDaysLeft,
       phone: user.phone,
+      candidateSettings, // Send fields payload
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error during login.' });
   }
 };
 
-// @desc    Register user
-// @route   POST /api/auth/register
 export const registerUser = async (req, res) => {
   const { 
     email, password, firstName, lastName, name, username, role, profilePicture,
@@ -83,11 +84,9 @@ export const registerUser = async (req, res) => {
       email, password, displayName: [fName, lName].filter(Boolean).join(' ')
     });
 
-    // Set trial start date for Basic (free tier) registrations
     const resolvedPlan = subscriptionPlan || 'None';
     const trialStartedAt = resolvedPlan === 'Basic' ? new Date() : null;
 
-    // For Basic plan, set 7-day expiry; paid plans start with null (set after payment)
     const subscriptionExpiresAt = resolvedPlan === 'Basic'
       ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
       : null;
@@ -116,23 +115,27 @@ export const registerUser = async (req, res) => {
       role: user.role,
       subscriptionPlan: user.subscriptionPlan,
       subscriptionExpiresAt: user.subscriptionExpiresAt,
+      candidateSettings: user.candidateSettings,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Get user profile
-// @route   GET /api/auth/profile
 export const getUserProfile = async (req, res) => {
   try {
     if (req.user) {
       let subscriptionDaysLeft = null;
       if (req.user.subscriptionExpiresAt) {
-        subscriptionDaysLeft = Math.max(
-          0,
-          Math.ceil((new Date(req.user.subscriptionExpiresAt) - new Date()) / (1000 * 60 * 60 * 24))
-        );
+        subscriptionDaysLeft = Math.max(0, Math.ceil((new Date(req.user.subscriptionExpiresAt) - new Date()) / (1000 * 60 * 60 * 24)));
+      }
+
+      let candidateSettings = req.user.candidateSettings || { hiddenFields: [], customFields: [] };
+      if (req.user.role !== 'manager' && req.user.tenantOwnerId) {
+        const manager = await User.findById(req.user.tenantOwnerId).select('candidateSettings');
+        if (manager && manager.candidateSettings) {
+          candidateSettings = manager.candidateSettings;
+        }
       }
 
       res.json({
@@ -152,6 +155,8 @@ export const getUserProfile = async (req, res) => {
         subscriptionExpiresAt: req.user.subscriptionExpiresAt,
         subscriptionDaysLeft,
         phone: req.user.phone,
+        candidateSettings,
+        candidatePrefix: req.user.candidatePrefix || 'CAND',
       });
     } else {
       res.status(404).json({ message: 'User not found.' });
@@ -161,8 +166,6 @@ export const getUserProfile = async (req, res) => {
   }
 };
 
-// @desc    Update user profile
-// @route   PUT /api/auth/profile
 export const updateUserProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
@@ -177,8 +180,18 @@ export const updateUserProfile = async (req, res) => {
     if (req.body.email) user.email = req.body.email;
     if (req.body.profilePicture !== undefined) user.profilePicture = req.body.profilePicture;
     if (req.body.phone !== undefined) user.phone = req.body.phone;
-    if (req.body.companyName !== undefined && user.role === 'manager') {
-      user.companyName = req.body.companyName;
+    
+    if (user.role === 'manager' || user.role === 'admin') {
+      if (req.body.companyName !== undefined) user.companyName = req.body.companyName;
+      // Allow managers to save custom form fields
+      if (req.body.candidateSettings !== undefined) {
+        user.candidateSettings = req.body.candidateSettings;
+      }
+      // Allow managers to update the candidate ID prefix
+      if (req.body.candidatePrefix !== undefined) {
+        const p = req.body.candidatePrefix.toString().toUpperCase().replace(/[^A-Z]/g, '').substring(0, 4);
+        if (p.length === 4) user.candidatePrefix = p;
+      }
     }
 
     const updatedUser = await user.save();
@@ -194,6 +207,8 @@ export const updateUserProfile = async (req, res) => {
       role: updatedUser.role,
       phone: updatedUser.phone,
       companyName: updatedUser.companyName,
+      candidateSettings: updatedUser.candidateSettings,
+      candidatePrefix: updatedUser.candidatePrefix || 'CAND',
     });
   } catch (error) {
     console.error('Update Profile Error:', error);
@@ -237,8 +252,6 @@ export const forgotPassword = async (req, res) => {
   }
 };
 
-// @desc    Delete user profile
-// @route   DELETE /api/auth/profile
 export const deleteUserProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);

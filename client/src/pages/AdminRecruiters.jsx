@@ -24,7 +24,7 @@ import { useAuth } from "@/context/AuthContext";
 
 // ── ENV ───────────────────────────────────────────────────────────────────────
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
-const API_URL  = `${BASE_URL}/api`;
+const API_URL = `${BASE_URL}/api`;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const getInitials = (fName = '', lName = '') =>
@@ -45,38 +45,38 @@ export default function AdminRecruiters() {
   };
 
   // ── Data ──────────────────────────────────────────────────────────────────
-  const [recruiters,  setRecruiters]  = useState([]);
-  const [candidates,  setCandidates]  = useState([]);
-  const [isLoading,   setIsLoading]   = useState(true);
+  const [recruiters, setRecruiters] = useState([]);
+  const [candidates, setCandidates] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   // ── UI State ──────────────────────────────────────────────────────────────
-  const [searchTerm,  setSearchTerm]  = useState("");
-  const [viewMode,    setViewMode]    = useState("grid");
-  const [sortField,   setSortField]   = useState("name");
-  const [sortOrder,   setSortOrder]   = useState("asc");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [viewMode, setViewMode] = useState("grid");
+  const [sortField, setSortField] = useState("name");
+  const [sortOrder, setSortOrder] = useState("asc");
 
   // ── Modals ────────────────────────────────────────────────────────────────
-  const [showModal,            setShowModal]            = useState(false);
-  const [showEditModal,        setShowEditModal]        = useState(false);
-  const [showDeleteModal,      setShowDeleteModal]      = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showPerformanceModal, setShowPerformanceModal] = useState(false);
-  const [showStatsModal,       setShowStatsModal]       = useState(false);
-  const [showCandidatesModal,  setShowCandidatesModal]  = useState(false);
+  const [showStatsModal, setShowStatsModal] = useState(false);
+  const [showCandidatesModal, setShowCandidatesModal] = useState(false);
 
   const [selectedStatsRecruiters, setSelectedStatsRecruiters] = useState([]);
-  const [statsModalTitle,         setStatsModalTitle]         = useState("");
-  const [candidatesModalTitle,    setCandidatesModalTitle]    = useState("");
-  const [candidateFilterType,     setCandidateFilterType]     = useState(null);
-  const [selectedRecruiter,       setSelectedRecruiter]       = useState(null);
-  const [recruiterToDelete,       setRecruiterToDelete]       = useState(null);
-  const [recruiterToToggle,       setRecruiterToToggle]       = useState(null);
-  const [showDeactivateModal,     setShowDeactivateModal]     = useState(false);
+  const [statsModalTitle, setStatsModalTitle] = useState("");
+  const [candidatesModalTitle, setCandidatesModalTitle] = useState("");
+  const [candidateFilterType, setCandidateFilterType] = useState(null);
+  const [selectedRecruiter, setSelectedRecruiter] = useState(null);
+  const [recruiterToDelete, setRecruiterToDelete] = useState(null);
+  const [recruiterToToggle, setRecruiterToToggle] = useState(null);
+  const [showDeactivateModal, setShowDeactivateModal] = useState(false);
 
-  const fileInputRef     = useRef(null);
+  const fileInputRef = useRef(null);
   const editFileInputRef = useRef(null);
 
   // ── Password visibility ───────────────────────────────────────────────────
-  const [showPassword,     setShowPassword]     = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [showEditPassword, setShowEditPassword] = useState(false);
 
   // ── Errors ────────────────────────────────────────────────────────────────
@@ -95,12 +95,12 @@ export default function AdminRecruiters() {
     username: "", password: "", profilePicture: "", role: "recruiter",
   };
 
-  const [newRecruiter,  setNewRecruiter]  = useState(EMPTY_RECRUITER);
+  const [newRecruiter, setNewRecruiter] = useState(EMPTY_RECRUITER);
   const [editRecruiter, setEditRecruiter] = useState({ id: "", ...EMPTY_RECRUITER });
 
   // ── Performance ───────────────────────────────────────────────────────────
-  const [startDate,       setStartDate]       = useState("");
-  const [endDate,         setEndDate]         = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [performanceData, setPerformanceData] = useState([]);
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
@@ -199,7 +199,7 @@ export default function AdminRecruiters() {
     if (errors[field]) setErrors((p) => { const n = { ...p }; delete n[field]; return n; });
 
     if (isEdit) setEditRecruiter((p) => ({ ...p, [field]: value }));
-    else        setNewRecruiter((p)  => ({ ...p, [field]: value }));
+    else setNewRecruiter((p) => ({ ...p, [field]: value }));
   };
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
@@ -316,7 +316,7 @@ export default function AdminRecruiters() {
     reader.onload = (ev) => {
       const result = ev.target?.result;
       if (isEdit) setEditRecruiter((p) => ({ ...p, profilePicture: result }));
-      else        setNewRecruiter((p)  => ({ ...p, profilePicture: result }));
+      else setNewRecruiter((p) => ({ ...p, profilePicture: result }));
     };
     reader.readAsDataURL(file);
   };
@@ -330,11 +330,11 @@ export default function AdminRecruiters() {
       if (!map[rid]) map[rid] = { total: 0, joined: 0, selected: 0, rejected: 0, turnups: 0, noShow: 0 };
       const sa = Array.isArray(c.status) ? c.status : [c.status || ''];
       map[rid].total++;
-      if (sa.includes('Joined'))   map[rid].joined++;
+      if (sa.includes('Joined')) map[rid].joined++;
       if (sa.includes('Selected')) map[rid].selected++;
       if (sa.includes('Rejected')) map[rid].rejected++;
-      if (sa.includes('Turnups'))  map[rid].turnups++;
-      if (sa.includes('No Show'))  map[rid].noShow++;
+      if (sa.includes('Turnups')) map[rid].turnups++;
+      if (sa.includes('No Show')) map[rid].noShow++;
     });
     return map;
   }, [candidates]);
@@ -356,24 +356,24 @@ export default function AdminRecruiters() {
 
   const filteredRecruiters = useMemo(() => recruiters
     .filter((r) => {
-      const q        = searchTerm.toLowerCase();
+      const q = searchTerm.toLowerCase();
       const fullName = `${r.firstName || ''} ${r.lastName || ''}`.toLowerCase();
       return fullName.includes(q) ||
-             (r.email      || '').toLowerCase().includes(q) ||
-             (r.username   || '').toLowerCase().includes(q) ||
-             (r.recruiterId || '').toLowerCase().includes(q) ||
-             (r.role       || '').toLowerCase().includes(q);
+        (r.email || '').toLowerCase().includes(q) ||
+        (r.username || '').toLowerCase().includes(q) ||
+        (r.recruiterId || '').toLowerCase().includes(q) ||
+        (r.role || '').toLowerCase().includes(q);
     })
     .sort((a, b) => {
       const sa = calcStats(a.id), sb = calcStats(b.id);
       let av = '', bv = '';
       switch (sortField) {
-        case 'name':     av = a.firstName;  bv = b.firstName;  break;
-        case 'email':    av = a.email;      bv = b.email;      break;
-        case 'id':       av = a.recruiterId || ''; bv = b.recruiterId || ''; break;
-        case 'total':    av = sa.total;     bv = sb.total;     break;
-        case 'joined':   av = sa.joined;    bv = sb.joined;    break;
-        case 'selected': av = sa.selected;  bv = sb.selected;  break;
+        case 'name': av = a.firstName; bv = b.firstName; break;
+        case 'email': av = a.email; bv = b.email; break;
+        case 'id': av = a.recruiterId || ''; bv = b.recruiterId || ''; break;
+        case 'total': av = sa.total; bv = sb.total; break;
+        case 'joined': av = sa.joined; bv = sb.joined; break;
+        case 'selected': av = sa.selected; bv = sb.selected; break;
         default: break;
       }
       return (av > bv ? 1 : -1) * (sortOrder === 'asc' ? 1 : -1);
@@ -386,18 +386,18 @@ export default function AdminRecruiters() {
       const rid = typeof c.recruiterId === 'object' ? c.recruiterId?._id : c.recruiterId;
       return rid === selectedRecruiter.id;
     });
-    if (candidateFilterType === 'joined')   list = list.filter((c) => (Array.isArray(c.status) ? c.status : [c.status]).includes('Joined'));
+    if (candidateFilterType === 'joined') list = list.filter((c) => (Array.isArray(c.status) ? c.status : [c.status]).includes('Joined'));
     if (candidateFilterType === 'selected') list = list.filter((c) => (Array.isArray(c.status) ? c.status : [c.status]).includes('Selected'));
     if (candidateFilterType === 'rejected') list = list.filter((c) => (Array.isArray(c.status) ? c.status : [c.status]).includes('Rejected'));
     return list;
   }, [candidates, selectedRecruiter, candidateFilterType]);
 
   // ── Summary stats ─────────────────────────────────────────────────────────
-  const isActive   = (r) => r.active !== false && r.active !== 'false';
-  const isInactive = (r) => r.active === false  || r.active === 'false';
+  const isActive = (r) => r.active !== false && r.active !== 'false';
+  const isInactive = (r) => r.active === false || r.active === 'false';
 
-  const totalR    = recruiters.length;
-  const activeR   = recruiters.filter(isActive).length;
+  const totalR = recruiters.length;
+  const activeR = recruiters.filter(isActive).length;
   const inactiveR = recruiters.filter(isInactive).length;
 
   // ── Status badge ──────────────────────────────────────────────────────────
@@ -410,7 +410,7 @@ export default function AdminRecruiters() {
           : "bg-red-100 text-red-800 border border-red-200"}>
         {active
           ? <><UserCheck className="h-3 w-3 mr-1" />Active</>
-          : <><UserX    className="h-3 w-3 mr-1" />Inactive</>}
+          : <><UserX className="h-3 w-3 mr-1" />Inactive</>}
       </Badge>
     );
   };
@@ -424,10 +424,10 @@ export default function AdminRecruiters() {
     const data = [];
     for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
       data.push({
-        date:        d.toISOString().split("T")[0],
+        date: d.toISOString().split("T")[0],
         submissions: Math.floor(Math.random() * 5),
-        turnups:     Math.floor(Math.random() * 3),
-        joined:      Math.floor(Math.random() * 2),
+        turnups: Math.floor(Math.random() * 3),
+        joined: Math.floor(Math.random() * 2),
       });
     }
     setPerformanceData(data);
@@ -439,8 +439,8 @@ export default function AdminRecruiters() {
     doc.text(`Performance Report: ${selectedRecruiter.firstName} ${selectedRecruiter.lastName}`, 14, 20);
     autoTable(doc, {
       startY: 30,
-      head:   [["Date", "Submissions", "Turnups", "Joined"]],
-      body:   performanceData.map((d) => [d.date, d.submissions, d.turnups, d.joined]),
+      head: [["Date", "Submissions", "Turnups", "Joined"]],
+      body: performanceData.map((d) => [d.date, d.submissions, d.turnups, d.joined]),
     });
     doc.save(`${selectedRecruiter.firstName}_${selectedRecruiter.lastName}_report.pdf`);
   };
@@ -483,8 +483,10 @@ export default function AdminRecruiters() {
               <div style={{ fontSize: '13px', opacity: 0.9 }}>{successBanner.message}</div>
             </div>
             <button onClick={() => setSuccessBanner({ show: false, message: '' })}
-              style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer',
-                opacity: 0.7, fontSize: '18px', lineHeight: 1, padding: '0 4px' }}>
+              style={{
+                background: 'none', border: 'none', color: 'white', cursor: 'pointer',
+                opacity: 0.7, fontSize: '18px', lineHeight: 1, padding: '0 4px'
+              }}>
               ✕
             </button>
           </div>
@@ -500,7 +502,7 @@ export default function AdminRecruiters() {
           </div>
           <Button
             onClick={() => { setShowModal(true); setErrors({}); setNewRecruiter(EMPTY_RECRUITER); }}
-            className="bg-blue-600 hover:bg-blue-700">
+            className="bg-blue-600 hover:bg-blue-700 text-white font-medium flex items-center">
             <UserPlus className="h-4 w-4 mr-2" /> Add User
           </Button>
         </div>
@@ -531,32 +533,32 @@ export default function AdminRecruiters() {
         </div>
 
         {/* ── Controls ─────────────────────────────────────────────────── */}
-        <Card>
+        <Card className="bg-white">
           <CardContent className="p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
             <div className="relative w-full md:max-w-md">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input
                 placeholder="Search by name, email, ID, role…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                className="pl-10 text-slate-800 bg-white border-slate-200"
               />
             </div>
             <div className="flex gap-2">
               <Select value={sortField} onValueChange={setSortField}>
-                <SelectTrigger className="w-[140px]"><SelectValue placeholder="Sort by" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="name">Name</SelectItem>
-                  <SelectItem value="email">Email</SelectItem>
-                  <SelectItem value="id">User ID</SelectItem>
-                  <SelectItem value="total">Candidates</SelectItem>
-                  <SelectItem value="joined">Joined</SelectItem>
-                  <SelectItem value="selected">Selected</SelectItem>
+                <SelectTrigger className="w-[140px] bg-white border-slate-200 text-slate-800"><SelectValue placeholder="Sort by" /></SelectTrigger>
+                <SelectContent className="bg-white text-slate-800 border-slate-200">
+                  <SelectItem value="name" className="hover:bg-slate-50 cursor-pointer">Name</SelectItem>
+                  <SelectItem value="email" className="hover:bg-slate-50 cursor-pointer">Email</SelectItem>
+                  <SelectItem value="id" className="hover:bg-slate-50 cursor-pointer">User ID</SelectItem>
+                  <SelectItem value="total" className="hover:bg-slate-50 cursor-pointer">Candidates</SelectItem>
+                  <SelectItem value="joined" className="hover:bg-slate-50 cursor-pointer">Joined</SelectItem>
+                  <SelectItem value="selected" className="hover:bg-slate-50 cursor-pointer">Selected</SelectItem>
                 </SelectContent>
               </Select>
-              <div className="flex border rounded-md overflow-hidden">
-                <Button variant={viewMode === 'grid' ? 'secondary' : 'ghost'} size="icon" onClick={() => setViewMode('grid')}><Grid3X3 className="h-4 w-4" /></Button>
-                <Button variant={viewMode === 'list' ? 'secondary' : 'ghost'} size="icon" onClick={() => setViewMode('list')}><List    className="h-4 w-4" /></Button>
+              <div className="flex border border-slate-200 rounded-md overflow-hidden bg-white">
+                <Button variant="ghost" size="icon" onClick={() => setViewMode('grid')} className={`h-9 w-9 rounded-none border-none ${viewMode === 'grid' ? 'bg-slate-100 text-slate-800' : 'text-slate-400 bg-white hover:bg-slate-50'}`}><Grid3X3 className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" onClick={() => setViewMode('list')} className={`h-9 w-9 rounded-none border-none ${viewMode === 'list' ? 'bg-slate-100 text-slate-800' : 'text-slate-400 bg-white hover:bg-slate-50'}`}><List className="h-4 w-4" /></Button>
               </div>
             </div>
           </CardContent>
@@ -581,10 +583,9 @@ export default function AdminRecruiters() {
                   const st = calcStats(r.id);
                   const isAdmin = r.role === 'admin';
                   return (
-                    <Card key={r.id} className={`hover:shadow-lg transition-shadow relative ${
-                      !isActive(r) ? 'opacity-70 border-red-200 bg-red-50/20' :
+                    <Card key={r.id} className={`bg-white hover:shadow-lg transition-shadow relative ${!isActive(r) ? 'opacity-70 border-red-200 bg-red-50/20' :
                       isAdmin ? 'border-purple-200 bg-purple-50/10' : ''
-                    }`}>
+                      }`}>
                       <CardHeader className="flex flex-row items-start justify-between pb-2">
                         <div className="flex items-start gap-3">
                           <div className={`h-12 w-12 rounded-full flex items-center justify-center text-white font-bold overflow-hidden flex-shrink-0 mt-0.5 ${isAdmin ? 'bg-gradient-to-br from-purple-500 to-indigo-600' : 'bg-gradient-to-br from-blue-500 to-cyan-500'}`}>
@@ -593,27 +594,27 @@ export default function AdminRecruiters() {
                               : getInitials(r.firstName, r.lastName)}
                           </div>
                           <div className="flex flex-col">
-                            <CardTitle className="text-base leading-tight">
+                            <CardTitle className="text-base leading-tight text-slate-800 font-bold">
                               <span className="flex items-center gap-1">
                                 {r.firstName} {r.lastName}
                                 {isAdmin && <ShieldAlert className="h-4 w-4 text-purple-600 flex-shrink-0" />}
                               </span>
                             </CardTitle>
                             <div className="flex items-center gap-1.5 mt-1.5">
-                              {r.recruiterId && <Badge variant="outline" className="text-xs flex-shrink-0">{r.recruiterId}</Badge>}
+                              {r.recruiterId && <Badge variant="outline" className="text-xs flex-shrink-0 bg-slate-50 border-slate-200 text-slate-700 font-medium">{r.recruiterId}</Badge>}
                               <StatusBadge recruiter={r} />
                             </div>
                           </div>
                         </div>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" className="hover:bg-slate-100 rounded-full h-8 w-8"><MoreVertical className="h-4 w-4 text-slate-500" /></Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEditModal(r)}>
+                          <DropdownMenuContent align="end" className="bg-white border-slate-200 shadow-xl text-slate-800">
+                            <DropdownMenuItem onClick={() => openEditModal(r)} className="hover:bg-slate-50 cursor-pointer">
                               <Edit className="h-4 w-4 mr-2" /> Edit
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { setSelectedRecruiter(r); setShowPerformanceModal(true); setPerformanceData([]); }}>
+                            <DropdownMenuItem onClick={() => { setSelectedRecruiter(r); setShowPerformanceModal(true); setPerformanceData([]); }} className="hover:bg-slate-50 cursor-pointer">
                               <TrendingUp className="h-4 w-4 mr-2" /> Performance Report
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => {
@@ -621,18 +622,18 @@ export default function AdminRecruiters() {
                               setCandidatesModalTitle(`All Candidates — ${r.firstName} ${r.lastName}`);
                               setCandidateFilterType(null);
                               setShowCandidatesModal(true);
-                            }}>
+                            }} className="hover:bg-slate-50 cursor-pointer">
                               <Users className="h-4 w-4 mr-2" /> View Candidates
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               onClick={() => { setRecruiterToToggle(r); setShowDeactivateModal(true); }}
-                              className={isActive(r) ? 'text-orange-600' : 'text-green-600'}>
+                              className={`hover:bg-slate-50 cursor-pointer ${isActive(r) ? 'text-orange-600' : 'text-green-600'}`}>
                               {isActive(r)
                                 ? <><UserX className="h-4 w-4 mr-2" />Deactivate</>
                                 : <><UserCheck className="h-4 w-4 mr-2" />Activate</>}
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="text-red-600"
+                            <DropdownMenuItem className="text-red-600 hover:bg-slate-50 cursor-pointer"
                               onClick={() => { setRecruiterToDelete(r); setShowDeleteModal(true); }}>
                               <Trash2 className="h-4 w-4 mr-2" /> Delete
                             </DropdownMenuItem>
@@ -641,11 +642,11 @@ export default function AdminRecruiters() {
                       </CardHeader>
 
                       <CardContent>
-                        <div className="space-y-1.5 text-sm text-gray-500 mb-4">
-                          <div className="flex items-center gap-2"><Mail      className="h-4 w-4 flex-shrink-0" /> {r.email}</div>
-                          {r.phone && <div className="flex items-center gap-2"><Phone className="h-4 w-4 flex-shrink-0" /> {r.phone}</div>}
+                        <div className="space-y-1.5 text-sm text-slate-600 mb-4">
+                          <div className="flex items-center gap-2"><Mail className="h-4 w-4 flex-shrink-0 text-slate-400" /> {r.email}</div>
+                          {r.phone && <div className="flex items-center gap-2"><Phone className="h-4 w-4 flex-shrink-0 text-slate-400" /> {r.phone}</div>}
                           <div className="flex items-center gap-2 capitalize">
-                            <Briefcase className="h-4 w-4 flex-shrink-0" />
+                            <Briefcase className="h-4 w-4 flex-shrink-0 text-slate-400" />
                             {isAdmin ? <span className="text-purple-600 font-medium">Admin</span> : (r.role || 'Recruiter')}
                           </div>
                         </div>
@@ -653,13 +654,13 @@ export default function AdminRecruiters() {
                         {/* Per-recruiter mini stats */}
                         <div className="grid grid-cols-4 gap-2 border-t pt-3 text-center">
                           {[
-                            { label: 'Total',    val: st.total,    filter: null,       color: 'text-blue-600' },
-                            { label: 'Turnups',  val: st.turnups,  filter: 'turnups',  color: 'text-teal-600' },
+                            { label: 'Total', val: st.total, filter: null, color: 'text-blue-600' },
+                            { label: 'Turnups', val: st.turnups, filter: 'turnups', color: 'text-teal-600' },
                             { label: 'Selected', val: st.selected, filter: 'selected', color: 'text-purple-600' },
-                            { label: 'Joined',   val: st.joined,   filter: 'joined',   color: 'text-green-600' },
+                            { label: 'Joined', val: st.joined, filter: 'joined', color: 'text-green-600' },
                           ].map(({ label, val, filter, color }) => (
                             <div key={label}
-                              className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded p-1 transition"
+                              className="cursor-pointer hover:bg-slate-50 rounded p-1 transition"
                               onClick={() => {
                                 setSelectedRecruiter(r);
                                 setCandidatesModalTitle(`${label} — ${r.firstName} ${r.lastName}`);
@@ -667,7 +668,7 @@ export default function AdminRecruiters() {
                                 setShowCandidatesModal(true);
                               }}>
                               <div className={`font-bold text-lg ${color}`}>{val}</div>
-                              <div className="text-[10px] text-gray-500">{label}</div>
+                              <div className="text-[10px] text-slate-500">{label}</div>
                             </div>
                           ))}
                         </div>
@@ -680,10 +681,10 @@ export default function AdminRecruiters() {
 
             {/* ── List View ──────────────────────────────────────────────── */}
             {viewMode === "list" && (
-              <Card>
+              <Card className="bg-white">
                 <CardContent className="p-0 overflow-x-auto">
                   <table className="w-full text-sm text-left">
-                    <thead className="bg-gray-50 dark:bg-gray-800 text-xs uppercase text-gray-500">
+                    <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                       <tr>
                         <th className="px-4 py-3 cursor-pointer" onClick={() => toggleSort('name')}>
                           <span className="flex items-center">User <SortIcon field="name" /></span>
@@ -711,10 +712,9 @@ export default function AdminRecruiters() {
                         const st = calcStats(r.id);
                         const isAdmin = r.role === 'admin';
                         return (
-                          <tr key={r.id} className={`border-b hover:bg-gray-50 dark:hover:bg-gray-800 ${
-                            !isActive(r) ? 'opacity-60 bg-red-50/30' :
+                          <tr key={r.id} className={`border-b hover:bg-slate-50/60 ${!isActive(r) ? 'opacity-60 bg-red-50/30' :
                             isAdmin ? 'bg-purple-50/20' : ''
-                          }`}>
+                            }`}>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold overflow-hidden flex-shrink-0 text-white ${isAdmin ? 'bg-purple-500' : 'bg-blue-500'}`}>
@@ -723,17 +723,17 @@ export default function AdminRecruiters() {
                                     : getInitials(r.firstName, r.lastName)}
                                 </div>
                                 <div>
-                                  <div className="font-medium flex items-center gap-1">
+                                  <div className="font-medium flex items-center gap-1 text-slate-800">
                                     {r.firstName} {r.lastName}
                                     {isAdmin && <ShieldAlert className="h-3 w-3 text-purple-600" />}
                                   </div>
-                                  <div className="text-xs text-gray-500">{r.email}</div>
+                                  <div className="text-xs text-slate-500">{r.email}</div>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-gray-500">{r.recruiterId || '-'}</td>
+                            <td className="px-4 py-3 text-slate-600">{r.recruiterId || '-'}</td>
                             <td className="px-4 py-3 capitalize">
-                              <span className={isAdmin ? 'text-purple-600 font-medium' : 'text-gray-600'}>
+                              <span className={isAdmin ? 'text-purple-600 font-medium' : 'text-slate-600'}>
                                 {r.role}
                               </span>
                             </td>
@@ -754,24 +754,24 @@ export default function AdminRecruiters() {
                             <td className="px-4 py-3 text-right">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button>
+                                  <Button variant="ghost" size="icon" className="hover:bg-slate-100 rounded-full h-8 w-8"><MoreVertical className="h-4 w-4 text-slate-500" /></Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem onClick={() => openEditModal(r)}>
+                                <DropdownMenuContent align="end" className="bg-white border-slate-200 shadow-xl text-slate-800">
+                                  <DropdownMenuItem onClick={() => openEditModal(r)} className="hover:bg-slate-50 cursor-pointer">
                                     <Edit className="h-4 w-4 mr-2" /> Edit
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => { setSelectedRecruiter(r); setShowPerformanceModal(true); setPerformanceData([]); }}>
+                                  <DropdownMenuItem onClick={() => { setSelectedRecruiter(r); setShowPerformanceModal(true); setPerformanceData([]); }} className="hover:bg-slate-50 cursor-pointer">
                                     <TrendingUp className="h-4 w-4 mr-2" /> Performance
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
                                     onClick={() => { setRecruiterToToggle(r); setShowDeactivateModal(true); }}
-                                    className={isActive(r) ? 'text-orange-600' : 'text-green-600'}>
+                                    className={`hover:bg-slate-50 cursor-pointer ${isActive(r) ? 'text-orange-600' : 'text-green-600'}`}>
                                     {isActive(r)
                                       ? <><UserX className="h-4 w-4 mr-2" />Deactivate</>
                                       : <><UserCheck className="h-4 w-4 mr-2" />Activate</>}
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem className="text-red-600"
+                                  <DropdownMenuItem className="text-red-600 hover:bg-slate-50 cursor-pointer"
                                     onClick={() => { setRecruiterToDelete(r); setShowDeleteModal(true); }}>
                                     <Trash2 className="h-4 w-4 mr-2" /> Delete
                                   </DropdownMenuItem>
@@ -797,9 +797,9 @@ export default function AdminRecruiters() {
         <Dialog open={showModal} onClose={() => setShowModal(false)} className="relative z-50">
           <DialogBackdrop className="fixed inset-0 bg-black/50" />
           <div className="fixed inset-0 flex items-center justify-center p-4">
-            <DialogPanel className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
-              <DialogTitle className="text-xl font-bold mb-1">Add User</DialogTitle>
-              <p className="text-sm text-gray-500 mb-4">First name, last name, email & password are required.</p>
+            <DialogPanel className="bg-white w-full max-w-lg rounded-xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+              <DialogTitle className="text-xl font-bold mb-1 text-slate-800">Add User</DialogTitle>
+              <p className="text-sm text-slate-500 mb-4">First name, last name, email & password are required.</p>
 
               <div className="space-y-4">
                 {/* Profile picture */}
@@ -810,7 +810,7 @@ export default function AdminRecruiters() {
                       : <Camera className="h-6 w-6 text-gray-400" />}
                   </div>
                   <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={(e) => handleFileUpload(e, false)} />
-                  <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>Upload Photo</Button>
+                  <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} className="bg-white text-slate-700 hover:bg-slate-50 border-slate-200">Upload Photo</Button>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -898,8 +898,8 @@ export default function AdminRecruiters() {
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
-                  <Button onClick={handleAddRecruiter} className="bg-blue-600 hover:bg-blue-700">Save User</Button>
+                  <Button variant="outline" onClick={() => setShowModal(false)} className="bg-white text-slate-700 hover:bg-slate-50 border-slate-200">Cancel</Button>
+                  <Button onClick={handleAddRecruiter} className="bg-blue-600 hover:bg-blue-700 text-white">Save User</Button>
                 </div>
               </div>
             </DialogPanel>
@@ -910,8 +910,8 @@ export default function AdminRecruiters() {
         <Dialog open={showEditModal} onClose={() => setShowEditModal(false)} className="relative z-50">
           <DialogBackdrop className="fixed inset-0 bg-black/50" />
           <div className="fixed inset-0 flex items-center justify-center p-4">
-            <DialogPanel className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
-              <DialogTitle className="text-xl font-bold mb-4">Edit User</DialogTitle>
+            <DialogPanel className="bg-white w-full max-w-lg rounded-xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+              <DialogTitle className="text-xl font-bold mb-4 text-slate-800">Edit User</DialogTitle>
 
               <div className="space-y-4">
                 <div className="flex items-center gap-4">
@@ -921,7 +921,7 @@ export default function AdminRecruiters() {
                       : <Camera className="h-6 w-6 text-gray-400" />}
                   </div>
                   <input type="file" ref={editFileInputRef} hidden accept="image/*" onChange={(e) => handleFileUpload(e, true)} />
-                  <Button variant="outline" size="sm" onClick={() => editFileInputRef.current?.click()}>Change Photo</Button>
+                  <Button variant="outline" size="sm" onClick={() => editFileInputRef.current?.click()} className="bg-white text-slate-700 hover:bg-slate-50 border-slate-200">Change Photo</Button>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -1009,8 +1009,8 @@ export default function AdminRecruiters() {
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="outline" onClick={() => setShowEditModal(false)}>Cancel</Button>
-                  <Button onClick={handleEditRecruiter} className="bg-blue-600 hover:bg-blue-700">Update User</Button>
+                  <Button variant="outline" onClick={() => setShowEditModal(false)} className="bg-white text-slate-700 hover:bg-slate-50 border-slate-200">Cancel</Button>
+                  <Button onClick={handleEditRecruiter} className="bg-blue-600 hover:bg-blue-700 text-white">Update User</Button>
                 </div>
               </div>
             </DialogPanel>
@@ -1058,10 +1058,9 @@ export default function AdminRecruiters() {
           <div className="fixed inset-0 flex items-center justify-center p-4">
             <DialogPanel className="bg-white dark:bg-gray-900 rounded-xl p-6 max-w-sm w-full shadow-2xl">
               <div className="flex flex-col items-center text-center gap-3">
-                <div className={`h-14 w-14 rounded-full flex items-center justify-center ${
-                  recruiterToToggle && isActive(recruiterToToggle)
-                    ? 'bg-orange-100' : 'bg-green-100'
-                }`}>
+                <div className={`h-14 w-14 rounded-full flex items-center justify-center ${recruiterToToggle && isActive(recruiterToToggle)
+                  ? 'bg-orange-100' : 'bg-green-100'
+                  }`}>
                   {recruiterToToggle && isActive(recruiterToToggle)
                     ? <UserX className="h-7 w-7 text-orange-600" />
                     : <UserCheck className="h-7 w-7 text-green-600" />}
@@ -1071,9 +1070,8 @@ export default function AdminRecruiters() {
                 </DialogTitle>
                 <p className="text-gray-500 text-sm">
                   Are you sure you want to{" "}
-                  <span className={`font-semibold ${
-                    recruiterToToggle && isActive(recruiterToToggle) ? 'text-orange-600' : 'text-green-600'
-                  }`}>
+                  <span className={`font-semibold ${recruiterToToggle && isActive(recruiterToToggle) ? 'text-orange-600' : 'text-green-600'
+                    }`}>
                     {recruiterToToggle && isActive(recruiterToToggle) ? 'deactivate' : 'activate'}
                   </span>{" "}
                   <span className="font-semibold text-gray-800 dark:text-gray-200">
@@ -1092,11 +1090,10 @@ export default function AdminRecruiters() {
                   No, Cancel
                 </Button>
                 <Button
-                  className={`flex-1 text-white ${
-                    recruiterToToggle && isActive(recruiterToToggle)
-                      ? 'bg-orange-500 hover:bg-orange-600'
-                      : 'bg-green-600 hover:bg-green-700'
-                  }`}
+                  className={`flex-1 text-white ${recruiterToToggle && isActive(recruiterToToggle)
+                    ? 'bg-orange-500 hover:bg-orange-600'
+                    : 'bg-green-600 hover:bg-green-700'
+                    }`}
                   onClick={handleToggleStatus}>
                   {recruiterToToggle && isActive(recruiterToToggle) ? 'Yes, Deactivate' : 'Yes, Activate'}
                 </Button>
@@ -1213,7 +1210,7 @@ export default function AdminRecruiters() {
         <Dialog open={showCandidatesModal} onClose={() => setShowCandidatesModal(false)} className="relative z-50">
           <DialogBackdrop className="fixed inset-0 bg-black/50" />
           <div className="fixed inset-0 flex items-center justify-center p-4">
-            <DialogPanel className="bg-white dark:bg-gray-900 w-full max-w-4xl rounded-xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <DialogPanel className="bg-white w-full max-w-4xl rounded-xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
               <DialogTitle className="text-xl font-bold mb-4">{candidatesModalTitle}</DialogTitle>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
@@ -1238,7 +1235,7 @@ export default function AdminRecruiters() {
                           <td className="p-3">
                             <div className="flex flex-wrap gap-1">
                               {(Array.isArray(c.status) ? c.status : [c.status || '']).map((s) => (
-                                <Badge key={s} variant="outline" className="text-xs">{s}</Badge>
+                                <Badge key={s} variant="outline" className="text-xs text-black">{s}</Badge>
                               ))}
                             </div>
                           </td>

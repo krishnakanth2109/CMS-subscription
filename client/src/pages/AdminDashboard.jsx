@@ -16,7 +16,7 @@ import { format } from 'date-fns';
 // ─── API Helpers ──────────────────────────────────────────────────────────────
 // FIX 1: Computed ONCE at module level — not re-computed on every render/call.
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
-const API_URL  = BASE_URL.endsWith('/api') ? BASE_URL : `${BASE_URL}/api`;
+const API_URL = BASE_URL.endsWith('/api') ? BASE_URL : `${BASE_URL}/api`;
 
 // FIX 2: Token read is a plain function — no hook overhead, no closure stale state.
 function getFirebaseToken() {
@@ -41,7 +41,7 @@ async function apiFetch(path) {
 // ─── Status Helper — defined OUTSIDE component so it is never re-created ─────
 // FIX 4: Moved out of component body → no new function reference on each render.
 const getSafeStatus = (s) => {
-  if (Array.isArray(s)) return String(s[0] || '').toLowerCase();
+  if (Array.isArray(s)) return String(s[s.length - 1] || '').toLowerCase();
   return String(s || '').toLowerCase();
 };
 
@@ -79,11 +79,11 @@ const PrimaryStatCard = React.memo(({ title, value, trend, icon: Icon, onClick }
 ));
 
 const BUBBLE_THEMES = {
-  green:  { bubble: 'bg-[#e8f5e9]', iconBg: 'bg-[#e8f5e9]', iconText: 'text-green-600',  badge: 'bg-green-500',  bar: 'bg-green-500'  },
-  blue:   { bubble: 'bg-[#e3f2fd]', iconBg: 'bg-[#e3f2fd]', iconText: 'text-blue-600',   badge: 'bg-blue-500',   bar: 'bg-blue-500'   },
+  green: { bubble: 'bg-[#e8f5e9]', iconBg: 'bg-[#e8f5e9]', iconText: 'text-green-600', badge: 'bg-green-500', bar: 'bg-green-500' },
+  blue: { bubble: 'bg-[#e3f2fd]', iconBg: 'bg-[#e3f2fd]', iconText: 'text-blue-600', badge: 'bg-blue-500', bar: 'bg-blue-500' },
   purple: { bubble: 'bg-[#f3e5f5]', iconBg: 'bg-[#f3e5f5]', iconText: 'text-purple-600', badge: 'bg-purple-500', bar: 'bg-purple-500' },
   orange: { bubble: 'bg-[#fff3e0]', iconBg: 'bg-[#fff3e0]', iconText: 'text-orange-500', badge: 'bg-orange-400', bar: 'bg-orange-400' },
-  red:    { bubble: 'bg-[#ffebee]', iconBg: 'bg-[#ffebee]', iconText: 'text-red-500',    badge: 'bg-red-500',    bar: 'bg-red-500'    },
+  red: { bubble: 'bg-[#ffebee]', iconBg: 'bg-[#ffebee]', iconText: 'text-red-500', badge: 'bg-red-500', bar: 'bg-red-500' },
 };
 
 // FIX 6: Theme map is module-level constant — not re-created inside the component on every render.
@@ -130,16 +130,16 @@ export default function AdminDashboard() {
   const { toast } = useToast();
   const { currentUser } = useAuth();
 
-  const [candidates,    setCandidates   ] = useState([]);
-  const [recruiters,    setRecruiters   ] = useState([]);
-  const [jobs,          setJobs         ] = useState([]);
-  const [loading,       setLoading      ] = useState(true);
+  const [candidates, setCandidates] = useState([]);
+  const [recruiters, setRecruiters] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   // Modal state
-  const [isModalOpen,     setIsModalOpen    ] = useState(false);
-  const [modalData,       setModalData      ] = useState([]);
-  const [modalLoading,    setModalLoading   ] = useState(false);
-  const [filterDate,      setFilterDate     ] = useState(() => new Date().toISOString().split('T')[0]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalData, setModalData] = useState([]);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [filterDate, setFilterDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [recruiterFilter, setRecruiterFilter] = useState('All');
 
   const RECRUITER_NAMES = ['All', 'Varun', 'Lahithya', 'Akhila', 'Hema', 'Nainika'];
@@ -160,9 +160,9 @@ export default function AdminDashboard() {
           // Fetching unused data wastes bandwidth and delays the dashboard.
         ]);
         if (cancelled) return;
-        if (candR.status  === 'fulfilled') setCandidates(candR.value);
-        if (recR.status   === 'fulfilled') setRecruiters(recR.value);
-        if (jobsR.status  === 'fulfilled') setJobs(jobsR.value);
+        if (candR.status === 'fulfilled') setCandidates(candR.value);
+        if (recR.status === 'fulfilled') setRecruiters(recR.value);
+        if (jobsR.status === 'fulfilled') setJobs(jobsR.value);
       } catch {
         if (!cancelled) toast({ title: 'Sync Error', description: 'Check server connection', variant: 'destructive' });
       } finally {
@@ -197,14 +197,14 @@ export default function AdminDashboard() {
 
   // ── Computed stats — all useMemo with correct minimal dep arrays ─────────────
   const stats = useMemo(() => {
-    const total    = candidates.length;
+    const total = candidates.length;
     const submitted = candidates.filter(c => { const s = getSafeStatus(c.status); return s === 'submitted' || s === 'pending'; }).length;
-    const joined   = candidates.filter(c => getSafeStatus(c.status) === 'joined').length;
-    const hold     = candidates.filter(c => getSafeStatus(c.status) === 'hold').length;
+    const joined = candidates.filter(c => getSafeStatus(c.status) === 'joined').length;
+    const hold = candidates.filter(c => getSafeStatus(c.status) === 'hold').length;
     const rejected = candidates.filter(c => getSafeStatus(c.status) === 'rejected').length;
 
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-    const todayEnd   = new Date(); todayEnd.setHours(23, 59, 59, 999);
+    const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
     const todaySubmissions = candidates.filter(c => {
       const d = new Date(c.dateAdded || c.createdAt);
       return d >= todayStart && d <= todayEnd;
@@ -217,17 +217,17 @@ export default function AdminDashboard() {
     return recruiters
       .filter(r => r._id || r.id)
       .map(r => {
-        const rid   = r._id || r.id;
+        const rid = r._id || r.id;
         const cands = candidates.filter(c => (c.recruiterId?._id || c.recruiterId) === rid);
-        const name  = r.name || `${r.firstName || ''} ${r.lastName || ''}`.trim();
+        const name = r.name || `${r.firstName || ''} ${r.lastName || ''}`.trim();
         return {
-          fullName:    name,
+          fullName: name,
           submissions: cands.length,
-          joined:      cands.filter(c => getSafeStatus(c.status) === 'joined').length,
-          pending:     cands.filter(c => ['submitted', 'pending'].includes(getSafeStatus(c.status))).length,
-          hold:        cands.filter(c => getSafeStatus(c.status) === 'hold').length,
-          rejected:    cands.filter(c => getSafeStatus(c.status) === 'rejected').length,
-          selected:    cands.filter(c => getSafeStatus(c.status) === 'selected').length,
+          joined: cands.filter(c => getSafeStatus(c.status) === 'joined').length,
+          pending: cands.filter(c => ['submitted', 'pending'].includes(getSafeStatus(c.status))).length,
+          hold: cands.filter(c => getSafeStatus(c.status) === 'hold').length,
+          rejected: cands.filter(c => getSafeStatus(c.status) === 'rejected').length,
+          selected: cands.filter(c => getSafeStatus(c.status) === 'selected').length,
         };
       })
       .filter(r => r.fullName !== '')
@@ -248,7 +248,7 @@ export default function AdminDashboard() {
   const filteredModalData = useMemo(() => {
     if (recruiterFilter === 'All') return modalData;
     return modalData.filter(c => {
-      const rec       = c.recruiterId;
+      const rec = c.recruiterId;
       if (!rec) return false;
       const firstName = (typeof rec === 'object'
         ? (rec.firstName || rec.name?.split(' ')[0] || rec.username || '')
@@ -259,8 +259,8 @@ export default function AdminDashboard() {
   }, [modalData, recruiterFilter]);
 
   // ── Stable handlers — useCallback so child onClick props don't change ref ────
-  const openModal   = useCallback(() => setIsModalOpen(true),  []);
-  const closeModal  = useCallback(() => setIsModalOpen(false), []);
+  const openModal = useCallback(() => setIsModalOpen(true), []);
+  const closeModal = useCallback(() => setIsModalOpen(false), []);
 
   // ─── Render ───────────────────────────────────────────────────────────────────
   if (loading) return <FullPageSpinner />;
@@ -297,8 +297,8 @@ export default function AdminDashboard() {
 
           <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.1em] text-gray-400 bg-white border border-gray-100 px-5 py-2.5 rounded-xl shadow-sm">
             <span className="flex items-center gap-2 px-2 border-r border-gray-100 mr-2">
-               <Calendar size={12} className="text-[#283086]" />
-               {formattedDate}
+              <Calendar size={12} className="text-[#283086]" />
+              {formattedDate}
             </span>
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
@@ -317,17 +317,17 @@ export default function AdminDashboard() {
           icon={Users}
           onClick={() => navigate('/admin/add-candidate', { state: { filter: 'All' } })}
         />
-        <BubbleStatCard title="Recruiters"        value={recruiters.length}        trend={5}  icon={UserCheck}    theme="green"  onClick={() => navigate('/admin/recruiters')} />
-        <BubbleStatCard title="Total Jobs"        value={jobs.length}              trend={8}  icon={Briefcase}    theme="blue"   onClick={() => navigate('/admin/requirements')} />
-        <BubbleStatCard title="Today Submissions" value={stats.todaySubmissions}   trend={14} icon={ClipboardList} theme="purple" onClick={openModal} />
+        <BubbleStatCard title="Recruiters" value={recruiters.length} trend={5} icon={UserCheck} theme="green" onClick={() => navigate('/admin/recruiters')} />
+        <BubbleStatCard title="Total Jobs" value={jobs.length} trend={8} icon={Briefcase} theme="blue" onClick={() => navigate('/admin/requirements')} />
+        <BubbleStatCard title="Today Submissions" value={stats.todaySubmissions} trend={14} icon={ClipboardList} theme="purple" onClick={openModal} />
       </div>
 
       {/* ── Row 2: Status Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <BubbleStatCard title="Submitted" value={stats.submitted} trend={12} icon={User}        theme="purple" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Submitted' } })} />
-        <BubbleStatCard title="Joined"    value={stats.joined}   trend={7}  icon={UserCheck}    theme="green"  onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Joined' } })} />
-        <BubbleStatCard title="Hold"      value={stats.hold}     trend={4}  icon={PauseCircle}  theme="orange" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Hold' } })} />
-        <BubbleStatCard title="Rejected"  value={stats.rejected} trend={5}  icon={UserX}        theme="red"    onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Rejected' } })} />
+        <BubbleStatCard title="Submitted" value={stats.submitted} trend={12} icon={User} theme="purple" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Submitted' } })} />
+        <BubbleStatCard title="Joined" value={stats.joined} trend={7} icon={UserCheck} theme="green" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Joined' } })} />
+        <BubbleStatCard title="Hold" value={stats.hold} trend={4} icon={PauseCircle} theme="orange" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Hold' } })} />
+        <BubbleStatCard title="Rejected" value={stats.rejected} trend={5} icon={UserX} theme="red" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Rejected' } })} />
       </div>
 
       {/* ── Row 3: Middle Cards ── */}
@@ -364,7 +364,7 @@ export default function AdminDashboard() {
               <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} dy={10} />
               <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => `${v}`} />
-              <Tooltip 
+              <Tooltip
                 cursor={{ fill: '#f8fafc', radius: 8 }}
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
               />

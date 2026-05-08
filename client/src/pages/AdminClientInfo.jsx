@@ -31,6 +31,7 @@ const ClientDetailCard = ({ client, onClose }) => {
                   <span className="bg-zinc-800 px-2 py-1 rounded-md border border-zinc-700 text-xs font-mono">
                     {client.clientId}
                   </span>
+                  {client.companyCode && <span className="bg-blue-900/30 text-blue-300 px-2 py-1 rounded-md border border-blue-800 text-xs font-bold uppercase tracking-wider">{client.companyCode}</span>}
                   {client.industry && <span>• {client.industry}</span>}
                   {client.clientLocation && <span>• {client.clientLocation}</span>}
                 </div>
@@ -117,7 +118,7 @@ export default function AdminClientInfo() {
 
   // ADDED NEW FIELDS TO INITIAL STATE
   const initialFormState = {
-    companyName: "", contactPerson: "", email: "", phone: "", website: "",
+    companyName: "", companyId: "", companyCode: "", contactPerson: "", email: "", phone: "", website: "",
     address: "", locationLink: "", industry: "", gstNumber: "", notes: "",
     clientId: "", percentage: "", candidatePeriod: "", replacementPeriod: "",
     lockingPeriod: "", paymentMode: "", clientLocation: "", // New Fields
@@ -275,6 +276,7 @@ export default function AdminClientInfo() {
     setEditingClient(client);
     setForm({
       ...initialFormState, ...client,
+      companyCode: client.companyCode || "",
       percentage: client.percentage?.toString() || "",
       candidatePeriod: client.candidatePeriod?.toString() || "",
       replacementPeriod: client.replacementPeriod?.toString() || "",
@@ -390,6 +392,10 @@ export default function AdminClientInfo() {
             
             {/* --- ADDED NEW FIELDS HERE --- */}
             <div>
+              <label className="block text-xs font-medium text-zinc-500 mb-1">Company Code</label>
+              <input name="companyCode" value={form.companyCode} onChange={handleChange} placeholder="e.g. MSFT, GOOG" className={inputCls} />
+            </div>
+            <div>
               <label className="block text-xs font-medium text-zinc-500 mb-1">Client Location</label>
               <input name="clientLocation" value={form.clientLocation} onChange={handleChange} placeholder="City, State" className={inputCls} />
             </div>
@@ -464,8 +470,9 @@ export default function AdminClientInfo() {
                 {/* --- MODIFIED TABLE HEADERS --- */}
                 <tr>
                   <th className="px-6 py-4 font-medium tracking-wider">Client</th>
+                  <th className="px-6 py-4 font-medium tracking-wider">Code</th>
                   <th className="px-6 py-4 font-medium tracking-wider">Contact</th>
-                  <th className="px-6 py-4 font-medium tracking-wider">Email</th> {/* Replaced Terms with Email */}
+                  <th className="px-6 py-4 font-medium tracking-wider">Email</th>
                   <th className="px-6 py-4 font-medium tracking-wider">Status</th>
                   <th className="px-6 py-4 font-medium tracking-wider text-right">Actions</th>
                 </tr>
@@ -478,6 +485,9 @@ export default function AdminClientInfo() {
                     <td className="px-6 py-4">
                       <div className="font-semibold text-zinc-900 dark:text-zinc-100">{client.companyName}</div>
                       <div className="text-xs text-zinc-500 font-mono mt-0.5">{client.clientId}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      {client.companyCode ? <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-1 rounded text-xs font-bold font-mono">{client.companyCode}</span> : "-"}
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-zinc-800 dark:text-zinc-300">{client.contactPerson || "-"}</div>

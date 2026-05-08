@@ -254,11 +254,11 @@ export const bulkImportCandidates = async (req, res) => {
 
     if (newRows.length > 0) {
       let nextNum = await getNextSequence(tenantOwnerId, prefix);
-      console.log(`Starting candidateId from: ${prefix}-${nextNum.toString().padStart(7, '0')}`);
+      console.log(`Starting candidateId from: ${prefix}-${nextNum.toString().padStart(3, '0')}`);
 
       for (const row of newRows) {
         try {
-          row.candidateData.candidateId = `${prefix}-${nextNum.toString().padStart(7, '0')}`;
+          row.candidateData.candidateId = `${prefix}-${nextNum.toString().padStart(3, '0')}`;
           nextNum++;
 
           const doc = new Candidate(row.candidateData);

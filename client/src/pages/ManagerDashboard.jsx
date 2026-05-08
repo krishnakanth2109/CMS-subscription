@@ -16,7 +16,7 @@ import { format } from 'date-fns';
 // ─── API Helpers ──────────────────────────────────────────────────────────────
 // Module-level constants — computed once, never re-derived on re-render.
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
-const API_URL  = BASE_URL.endsWith('/api') ? BASE_URL : `${BASE_URL}/api`;
+const API_URL = BASE_URL.endsWith('/api') ? BASE_URL : `${BASE_URL}/api`;
 
 function getFirebaseToken() {
   try {
@@ -44,11 +44,11 @@ const getSafeStatus = (s) => {
 
 // ─── Theme map — module level constant, not recreated per render ──────────────
 const BUBBLE_THEMES = {
-  green:  { bubble: 'bg-[#e8f5e9]', iconBg: 'bg-[#e8f5e9]', iconText: 'text-green-600',  badge: 'bg-green-500',  bar: 'bg-green-500'  },
-  blue:   { bubble: 'bg-[#e3f2fd]', iconBg: 'bg-[#e3f2fd]', iconText: 'text-blue-600',   badge: 'bg-blue-500',   bar: 'bg-blue-500'   },
+  green: { bubble: 'bg-[#e8f5e9]', iconBg: 'bg-[#e8f5e9]', iconText: 'text-green-600', badge: 'bg-green-500', bar: 'bg-green-500' },
+  blue: { bubble: 'bg-[#e3f2fd]', iconBg: 'bg-[#e3f2fd]', iconText: 'text-blue-600', badge: 'bg-blue-500', bar: 'bg-blue-500' },
   purple: { bubble: 'bg-[#f3e5f5]', iconBg: 'bg-[#f3e5f5]', iconText: 'text-purple-600', badge: 'bg-purple-500', bar: 'bg-purple-500' },
   orange: { bubble: 'bg-[#fff3e0]', iconBg: 'bg-[#fff3e0]', iconText: 'text-orange-500', badge: 'bg-orange-400', bar: 'bg-orange-400' },
-  red:    { bubble: 'bg-[#ffebee]', iconBg: 'bg-[#ffebee]', iconText: 'text-red-500',    badge: 'bg-red-500',    bar: 'bg-red-500'    },
+  red: { bubble: 'bg-[#ffebee]', iconBg: 'bg-[#ffebee]', iconText: 'text-red-500', badge: 'bg-red-500', bar: 'bg-red-500' },
 };
 
 // ─── Card components — defined OUTSIDE parent so React doesn't unmount/remount
@@ -120,9 +120,9 @@ export default function AdminDashboard() {
 
   const [candidates, setCandidates] = useState([]);
   const [recruiters, setRecruiters] = useState([]);
-  const [clients,    setClients   ] = useState([]);
-  const [jobs,       setJobs      ] = useState([]);
-  const [loading,    setLoading   ] = useState(true);
+  const [clients, setClients] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   // FIX: Added cleanup flag to prevent setState on unmounted component.
   // FIX: Promise.allSettled so a slow /jobs or /clients endpoint never blocks
@@ -139,9 +139,9 @@ export default function AdminDashboard() {
           apiFetch('/clients'),
         ]);
         if (cancelled) return;
-        if (candR.status   === 'fulfilled') setCandidates(candR.value);
-        if (recR.status    === 'fulfilled') setRecruiters(recR.value);
-        if (jobsR.status   === 'fulfilled') setJobs(jobsR.value);
+        if (candR.status === 'fulfilled') setCandidates(candR.value);
+        if (recR.status === 'fulfilled') setRecruiters(recR.value);
+        if (jobsR.status === 'fulfilled') setJobs(jobsR.value);
         if (clientR.status === 'fulfilled') setClients(clientR.value);
       } catch {
         if (!cancelled) toast({ title: 'Sync Error', description: 'Check server connection', variant: 'destructive' });
@@ -156,28 +156,35 @@ export default function AdminDashboard() {
 
   // ── Memoized computed values ──────────────────────────────────────────────
   const stats = useMemo(() => {
-    const total     = candidates.length;
-    const submitted = candidates.filter(c => { const s = getSafeStatus(c.status); return s === 'submitted' || s === 'pending'; }).length;
-    const joined    = candidates.filter(c => getSafeStatus(c.status) === 'joined').length;
-    const hold      = candidates.filter(c => getSafeStatus(c.status) === 'hold').length;
-    const rejected  = candidates.filter(c => getSafeStatus(c.status) === 'rejected').length;
-    return { total, submitted, joined, hold, rejected };
+    // Exact count helper from AddCandidate.jsx (Progress Theory)
+    const count = (s) => candidates.filter((c) => (Array.isArray(c.status) ? c.status : [c.status || '']).includes(s)).length;
+    
+    return {
+      total: candidates.length,
+      submitted: count('Submitted'),
+      joined: count('Joined'),
+      hold: count('Hold'),
+      rejected: count('Rejected'),
+      pipeline: count('Pipeline'),
+      selected: count('Selected'),
+    };
   }, [candidates]);
 
   const recruiterStats = useMemo(() => {
     return recruiters
       .filter(r => r._id || r.id)
       .map(r => {
-        const rid   = r._id || r.id;
+        const rid = r._id || r.id;
         const cands = candidates.filter(c => (c.recruiterId?._id || c.recruiterId) === rid);
-        const name  = r.name || `${r.firstName || ''} ${r.lastName || ''}`.trim();
+        const name = r.name || `${r.firstName || ''} ${r.lastName || ''}`.trim();
+        const getCount = (s) => cands.filter((c) => (Array.isArray(c.status) ? c.status : [c.status || '']).includes(s)).length;
         return {
-          fullName:    name,
+          fullName: name,
           submissions: cands.length,
-          joined:      cands.filter(c => getSafeStatus(c.status) === 'joined').length,
-          pending:     cands.filter(c => ['submitted', 'pending'].includes(getSafeStatus(c.status))).length,
-          hold:        cands.filter(c => getSafeStatus(c.status) === 'hold').length,
-          rejected:    cands.filter(c => getSafeStatus(c.status) === 'rejected').length,
+          joined: getCount('Joined'),
+          pending: getCount('Submitted'),
+          hold: getCount('Hold'),
+          rejected: getCount('Rejected'),
         };
       })
       .filter(r => r.fullName !== '')
@@ -226,17 +233,17 @@ export default function AdminDashboard() {
           icon={Users}
           onClick={() => navigate('/admin/add-candidate', { state: { filter: 'All' } })}
         />
-        <BubbleStatCard title="Recruiters"    value={recruiters.length} trend={5} icon={UserCheck} theme="green"  onClick={() => navigate('/admin/recruiters')} />
-        <BubbleStatCard title="Total Jobs"    value={jobs.length}       trend={8} icon={Briefcase}  theme="blue"   onClick={() => navigate('/admin/requirements')} />
-        <BubbleStatCard title="Total Clients" value={clients.length}    trend={3} icon={FileText}   theme="purple" onClick={() => navigate('/admin/clients')} />
+        <BubbleStatCard title="Recruiters" value={recruiters.length} trend={5} icon={UserCheck} theme="green" onClick={() => navigate('/admin/recruiters')} />
+        <BubbleStatCard title="Total Jobs" value={jobs.length} trend={8} icon={Briefcase} theme="blue" onClick={() => navigate('/admin/requirements')} />
+        <BubbleStatCard title="Total Clients" value={clients.length} trend={3} icon={FileText} theme="purple" onClick={() => navigate('/admin/clients')} />
       </div>
 
       {/* ── Row 2: Status Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <BubbleStatCard title="Submitted" value={stats.submitted} trend={12} icon={User}       theme="purple" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Submitted' } })} />
-        <BubbleStatCard title="Joined"    value={stats.joined}   trend={7}  icon={UserCheck}   theme="green"  onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Joined' } })} />
-        <BubbleStatCard title="Hold"      value={stats.hold}     trend={4}  icon={PauseCircle} theme="orange" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Hold' } })} />
-        <BubbleStatCard title="Rejected"  value={stats.rejected} trend={5}  icon={UserX}       theme="red"    onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Rejected' } })} />
+        <BubbleStatCard title="Submitted" value={stats.submitted} trend={12} icon={User} theme="purple" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Submitted' } })} />
+        <BubbleStatCard title="Joined" value={stats.joined} trend={7} icon={UserCheck} theme="green" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Joined' } })} />
+        <BubbleStatCard title="Hold" value={stats.hold} trend={4} icon={PauseCircle} theme="orange" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Hold' } })} />
+        <BubbleStatCard title="Rejected" value={stats.rejected} trend={5} icon={UserX} theme="red" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Rejected' } })} />
       </div>
 
       {/* ── Row 3: Middle Cards ── */}

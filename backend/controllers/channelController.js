@@ -1,6 +1,7 @@
 import Channel from '../models/Channel.js';
 import Message from '../models/Message.js';
 import User from '../models/User.js';
+import { getTenantOwnerId } from '../middleware/authMiddleware.js';
 
 // ── GET /api/channels  — list channels the user belongs to (or all public if admin)
 export const getChannels = async (req, res) => {
@@ -59,12 +60,14 @@ export const createChannel = async (req, res) => {
     });
 
     // Post a system message
+    const tenantOwnerId = getTenantOwnerId(req.user);
     await Message.create({
       channelId: channel._id,
       senderId: userId,
       senderName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
       content: `Channel "${channel.name}" was created.`,
       type: 'system',
+      tenantOwnerId,
     });
 
     const populated = await Channel.findById(channel._id)
@@ -190,6 +193,7 @@ export const sendChannelMessage = async (req, res) => {
 
     const senderName = [firstName, lastName].filter(Boolean).join(' ') || username || 'User';
 
+    const tenantOwnerId = getTenantOwnerId(req.user);
     const message = await Message.create({
       channelId: channel._id,
       senderId: userId,
@@ -199,6 +203,7 @@ export const sendChannelMessage = async (req, res) => {
       replyTo: replyTo || null,
       replyPreview: replyPreview || '',
       readBy: [userId],
+      tenantOwnerId,
     });
 
     // Update channel last message

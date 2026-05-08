@@ -96,7 +96,7 @@ function AppRoutes() {
         {/* ===================== MASTER ROUTES ===================== */}
         {/* URL: /master is strictly the login form */}
         <Route path="/master" element={<MasterLogin />} />
-        
+
         {/* URL: /master-panel contains the logged-in dashboard and sidebar */}
         <Route path="/master-panel" element={<MasterLayout />}>
           <Route index element={<MasterDashboard />} />

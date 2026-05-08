@@ -41,10 +41,8 @@ const userSchema = new mongoose.Schema(
     subscriptionExpiresAt: { type: Date, default: null },
     subscriptionPaymentId: { type: String, default: '' },
     subscriptionOrderId:   { type: String, default: '' },
-    // For free trial: set when manager registers with Basic plan
     trialStartedAt:        { type: Date, default: null },
 
-    // ── Candidate ID Prefix (Manager-level setting) ───────────────────────────
     candidatePrefix: {
       type: String,
       uppercase: true,
@@ -54,6 +52,17 @@ const userSchema = new mongoose.Schema(
         validator: (v) => /^[A-Z]{4}$/.test(v),
         message: 'candidatePrefix must be exactly 4 uppercase letters (A-Z).',
       },
+    },
+
+    // ── Tenant Candidate Field Preferences ────────────────────────────────────
+    candidateSettings: {
+      // Standard fields the tenant wishes to hide/remove
+      hiddenFields: { type: [String], default: [] },
+      // Custom fields the tenant has added
+      customFields: [{
+        fieldName: { type: String, required: true },
+        fieldType: { type: String, enum: ['text', 'number', 'date', 'boolean'], default: 'text' }
+      }]
     },
 
     active:         { type: Boolean, default: true },

@@ -34,7 +34,23 @@ router.post('/', async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to create clients' });
     }
 
-    const client = await Client.create({ ...req.body, tenantOwnerId });
+    // const client = await Client.create({ ...req.body, tenantOwnerId });
+     // Auto-generate clientId if not provided (or empty)
+    let { clientId } = req.body;
+    if (!clientId) {
+      const last = await Client.findOne(
+        { tenantOwnerId, clientId: { $regex: /^CL\d+$/ } },
+        { clientId: 1 }
+      ).sort({ clientId: -1 }).lean();
+
+      const lastNum = last?.clientId ? parseInt(last.clientId.replace('CL', ''), 10) : 1000;
+      clientId = `CL${lastNum + 1}`;
+    }
+
+    const updateData = { ...req.body };
+    delete updateData.tenantOwnerId; // never allow caller to set tenant
+
+    const client = await Client.create({ ...updateData, clientId, tenantOwnerId });
     res.status(201).json(client);
   } catch (error) {
     res.status(400).json({ message: error.message });

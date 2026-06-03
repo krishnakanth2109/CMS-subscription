@@ -49,7 +49,6 @@ const RecruiterSchedules = lazy(() => import('@/pages/RecruiterSchedules'));
 const MessagesRecruiters = lazy(() => import('@/pages/MessagesRecruiters'));
 const RecruiterReports = lazy(() => import('@/pages/RecruiterReports'));
 const RecruiterProfile = lazy(() => import('@/pages/RecruiterProfile'));
-const RecruiterSettings = lazy(() => import('@/pages/RecruiterSettings'));
 
 const LoadingFallback = () => (
   <div className="min-h-screen flex flex-col items-center justify-center bg-white">
@@ -122,7 +121,7 @@ function AppRoutes() {
           <Route path="messages" element={userRole === 'manager' ? <ManagerMessages /> : <AdminMessages />} />
           <Route path="reports" element={<AdminReports />} />
           <Route path="mock" element={<MockInterviewsDashboard />} />
-          <Route path="settings" element={<AdminSettings />} />
+          <Route path="profile" element={<AdminSettings />} />
           <Route path="agreements" element={<AgreementGenerator />} />
         </Route>
 
@@ -140,7 +139,6 @@ function AppRoutes() {
           <Route path="reports" element={<RecruiterReports />} />
           <Route path="mock" element={<MockInterviewsDashboard />} />
           <Route path="profile" element={<RecruiterProfile />} />
-          <Route path="settings" element={<RecruiterSettings />} />
         </Route>
 
         {/* ===================== FALLBACK ===================== */}

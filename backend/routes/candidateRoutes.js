@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import Candidate from '../models/Candidate.js';
+import CandidateSubmission from '../models/CandidateSubmission.js';
 import User from '../models/User.js';
 import { parseResume } from './resumeParser.js';
 import { protect } from '../middleware/authMiddleware.js';
@@ -11,6 +12,7 @@ import {
   updateCandidateRemarks,
   inlineUpdateCandidate,
 } from '../controllers/candidateStatusController.js';
+import { bulkImportCandidates } from '../controllers/bulkImportController.js';
 
 const router = express.Router();
 
@@ -138,12 +140,31 @@ router.get('/', async (req, res) => {
       };
     }
 
-    const candidates = await Candidate.find(query)
-      .populate('recruiterId', 'name firstName lastName email')
-      .sort({ createdAt: -1 })
-      .lean();
+    const [candidates, submissions] = await Promise.all([
+      Candidate.find(query)
+        .populate('recruiterId', 'name firstName lastName email')
+        .sort({ createdAt: -1 })
+        .lean(),
+      CandidateSubmission.find({ tenantOwnerId })
+        .populate('jobId', 'position jobCode')
+        .lean()
+    ]);
 
-    res.json(candidates);
+    const submissionMap = {};
+    submissions.forEach(sub => {
+      const candId = sub.candidateId.toString();
+      if (!submissionMap[candId]) {
+        submissionMap[candId] = [];
+      }
+      submissionMap[candId].push(sub);
+    });
+
+    const candidatesWithSubmissions = candidates.map(c => ({
+      ...c,
+      submissions: submissionMap[c._id.toString()] || []
+    }));
+
+    res.json(candidatesWithSubmissions);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -240,6 +261,9 @@ router.post('/', upload.single('resume'), async (req, res) => {
 });
 
 
+// ─── Bulk Import (JSON body — no file upload) ─────────────────────────────────
+router.post('/bulk-import', express.json({ limit: '10mb' }), bulkImportCandidates);
+
 router.put('/bulk-assign', async (req, res) => {
   try {
     if (req.user.role !== 'admin' && req.user.role !== 'manager') {
@@ -285,7 +309,7 @@ router.get('/:id', async (req, res) => {
     const candidate = await Candidate.findOne({
       _id: req.params.id,
       tenantOwnerId,
-    }).populate('recruiterId', 'name firstName lastName email');
+    }).populate('recruiterId', 'name firstName lastName email').lean();
 
     if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
 
@@ -296,6 +320,13 @@ router.get('/:id', async (req, res) => {
         return res.status(403).json({ message: 'Not authorized to view this candidate' });
       }
     }
+
+    const submissions = await CandidateSubmission.find({
+      candidateId: candidate._id,
+      tenantOwnerId
+    }).populate('jobId', 'jobCode position').lean();
+
+    candidate.submissions = submissions || [];
 
     res.json(candidate);
   } catch (error) {

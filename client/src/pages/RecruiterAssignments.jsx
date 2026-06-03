@@ -8,6 +8,7 @@ import {
   TrashIcon, UserCircleIcon
 } from "@heroicons/react/24/outline";
 import { useToast } from "@/hooks/use-toast";
+import JobDetailsModal, { JobCodeButton } from "@/components/JobDetailsModal";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -109,7 +110,10 @@ export default function RecruiterAssignments() {
   
   const [viewMode, setViewMode] = useState('grid');
   const [searchQuery, setSearchQuery] = useState('');
+  const [expiryFilter, setExpiryFilter] = useState('all');
+  const [dueDaysSort, setDueDaysSort] = useState('none');
   const [selectedJob, setSelectedJob] = useState(null);
+  const [jobDetailJob, setJobDetailJob] = useState(null);
   
   const [isJobModalOpen, setIsJobModalOpen] = useState(false);
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
@@ -122,7 +126,7 @@ export default function RecruiterAssignments() {
   const initialJobForm = {
     jobCode: '', clientName: '', position: '', skills: '', salaryBudget: '', monthlySalary: '',
     location: '', experience: '', gender: 'Any', interviewMode: 'Virtual',
-    tatTime: '', jdLink: '', comments: '', primaryRecruiter: '', secondaryRecruiter: ''
+    tatTime: '', jobDescription: '', comments: '', primaryRecruiter: '', secondaryRecruiter: ''
   };
 
   const [jobForm, setJobForm] = useState(initialJobForm);
@@ -179,7 +183,7 @@ export default function RecruiterAssignments() {
       gender: job.gender || 'Any',
       interviewMode: job.interviewMode || 'Virtual',
       tatTime: job.tatTime ? new Date(job.tatTime).toISOString().substring(0, 10) : '',
-      jdLink: job.jdLink || '',
+      jobDescription: job.jobDescription || '',
       comments: job.comments || '',
       primaryRecruiter: job.primaryRecruiter || '',
       secondaryRecruiter: job.secondaryRecruiter || ''
@@ -233,16 +237,49 @@ export default function RecruiterAssignments() {
   };
 
   const filteredJobs = useMemo(() => {
-    return jobs.filter(job => {
+    const getDueDays = (tatTime) => {
+      if (!tatTime) return null;
+      const expiry = new Date(tatTime);
+      if (Number.isNaN(expiry.getTime())) return null;
+      expiry.setHours(0, 0, 0, 0);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return Math.round((expiry - today) / (1000 * 60 * 60 * 24));
+    };
+
+    let result = jobs.filter(job => {
       const query = searchQuery.toLowerCase();
-      return (
+      const matchesSearch = (
         job.position?.toLowerCase().includes(query) ||
         job.clientName?.toLowerCase().includes(query) ||
         job.jobCode?.toLowerCase().includes(query) ||
         job.location?.toLowerCase().includes(query)
       );
+      if (!matchesSearch) return false;
+
+      const dueDays = getDueDays(job.tatTime);
+      if (expiryFilter === 'expired') return dueDays !== null && dueDays < 0;
+      if (expiryFilter === 'today') return dueDays === 0;
+      if (expiryFilter === 'upcoming') return dueDays !== null && dueDays > 0;
+      if (expiryFilter === 'next7') return dueDays !== null && dueDays >= 0 && dueDays <= 7;
+      if (expiryFilter === 'next30') return dueDays !== null && dueDays >= 0 && dueDays <= 30;
+      if (expiryFilter === 'withDate') return dueDays !== null;
+      if (expiryFilter === 'noDate') return dueDays === null;
+      return true;
     });
-  }, [jobs, searchQuery]);
+
+    if (dueDaysSort === 'asc' || dueDaysSort === 'desc') {
+      result = [...result].sort((a, b) => {
+        const aDue = getDueDays(a.tatTime);
+        const bDue = getDueDays(b.tatTime);
+        const aVal = aDue === null ? Number.POSITIVE_INFINITY : aDue;
+        const bVal = bDue === null ? Number.POSITIVE_INFINITY : bDue;
+        return dueDaysSort === 'asc' ? aVal - bVal : bVal - aVal;
+      });
+    }
+
+    return result;
+  }, [jobs, searchQuery, expiryFilter, dueDaysSort]);
 
   return (
     <>
@@ -262,15 +299,40 @@ export default function RecruiterAssignments() {
 
           {/* Search / View Toggle */}
           <div className="flex flex-col md:flex-row gap-4 justify-between items-center bg-white dark:bg-zinc-900 p-3 rounded-xl shadow-sm border border-zinc-200 dark:border-zinc-800">
-            <div className="relative w-full md:w-96">
-              <MagnifyingGlassIcon className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400"/>
-              <input 
-                type="text" 
-                placeholder="Search by Job Code, Role or Client..." 
-                className="w-full pl-9 p-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-sm focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100 outline-none text-zinc-900 dark:text-zinc-100 placeholder-zinc-400" 
-                value={searchQuery} 
-                onChange={e => setSearchQuery(e.target.value)}
-              />
+            <div className="w-full md:flex-1 flex flex-col md:flex-row gap-3">
+              <div className="relative w-full md:max-w-96">
+                <MagnifyingGlassIcon className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400"/>
+                <input 
+                  type="text" 
+                  placeholder="Search by Job Code, Role or Client..." 
+                  className="w-full pl-9 p-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-sm focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100 outline-none text-zinc-900 dark:text-zinc-100 placeholder-zinc-400" 
+                  value={searchQuery} 
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <select
+                value={expiryFilter}
+                onChange={(e) => setExpiryFilter(e.target.value)}
+                className="w-full md:w-52 p-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-sm text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100 outline-none"
+              >
+                <option value="all">Expiry: All</option>
+                <option value="expired">Expired</option>
+                <option value="today">Expiring Today</option>
+                <option value="upcoming">Upcoming</option>
+                <option value="next7">Due in Next 7 Days</option>
+                <option value="next30">Due in Next 30 Days</option>
+                <option value="withDate">With Expiry Date</option>
+                <option value="noDate">No Expiry Date</option>
+              </select>
+              <select
+                value={dueDaysSort}
+                onChange={(e) => setDueDaysSort(e.target.value)}
+                className="w-full md:w-60 p-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-sm text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100 outline-none"
+              >
+                <option value="none">Sort By: Default</option>
+                <option value="asc">Due Days (Ascending)</option>
+                <option value="desc">Due Days (Descending)</option>
+              </select>
             </div>
             <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg border border-zinc-200 dark:border-zinc-700">
               <button onClick={() => setViewMode('grid')} className={`p-2 rounded-md transition-all ${viewMode === 'grid' ? 'bg-white dark:bg-zinc-900 shadow-sm text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400'}`}>
@@ -304,13 +366,18 @@ export default function RecruiterAssignments() {
                   <div key={job.id} className={`p-6 rounded-xl shadow-sm border transition-all relative group bg-white dark:bg-zinc-900 ${isExpired ? 'border-red-200 dark:border-red-900/50 bg-red-50/20 dark:bg-red-950/20 opacity-80' : 'border-zinc-200 dark:border-zinc-800 hover:shadow-md'}`}>
                     <div className="flex justify-between items-start mb-4">
                       <div>
-                        <span className="text-[10px] font-mono font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700">{job.jobCode}</span>
+                        <JobCodeButton
+                          jobCode={job.jobCode}
+                          onClick={() => setJobDetailJob(job)}
+                          className="text-[10px] px-2 py-1"
+                        />
                         <h3 className={`text-lg font-bold mt-2.5 truncate max-w-[200px] ${isExpired ? 'text-red-900 dark:text-red-400' : 'text-zinc-900 dark:text-white'}`} title={job.position}>{job.position}</h3>
                         <p className="text-sm text-zinc-500 flex items-center gap-1.5 mt-1"><BuildingOfficeIcon className="w-4 h-4"/> {job.clientName}</p>
                       </div>
                     </div>
                     <div className="space-y-2 text-sm mb-4 bg-zinc-50 dark:bg-zinc-950 p-4 rounded-lg border border-zinc-100 dark:border-zinc-800/50">
                       <div className="flex justify-between items-center"><span className="text-zinc-500">Location:</span> <span className="font-medium text-zinc-900 dark:text-zinc-100">{job.location || 'Remote'}</span></div>
+                      <div className="flex justify-between items-center"><span className="text-zinc-500">Salary:</span> <span className="font-medium text-zinc-900 dark:text-zinc-100">{job.salaryBudget || 'N/A'}</span></div>
                       {/* ✅ Added Assigned Date to Grid */}
                       <div className="flex justify-between items-center"><span className="text-zinc-500">Assigned Date:</span> <span className="font-medium text-zinc-900 dark:text-zinc-100">{formatDate(job.createdAt)}</span></div>
                       <div className="flex justify-between items-center"><span className="text-zinc-500">Date of Expiry:</span> {getTatBadge(job.tatTime)}</div>
@@ -332,6 +399,7 @@ export default function RecruiterAssignments() {
                   <tr>
                     <th className="p-4 font-semibold">Job Code</th>
                     <th className="p-4 font-semibold">Position</th>
+                    <th className="p-4 font-semibold">Salary</th>
                     <th className="p-4 font-semibold">Client</th>
                     <th className="p-4 font-semibold">Location</th>
                     {/* ✅ Added Assigned Date to Table Header */}
@@ -345,8 +413,11 @@ export default function RecruiterAssignments() {
                     const isExpired = job.tatTime && (new Date(job.tatTime).setHours(0,0,0,0) < new Date().setHours(0,0,0,0));
                     return (
                       <tr key={job.id} className={`transition-colors ${isExpired ? 'bg-red-50/20 dark:bg-red-900/10' : 'hover:bg-zinc-50/50 dark:hover:bg-zinc-800/20'}`}>
-                        <td className="p-4 font-mono text-xs text-zinc-600 dark:text-zinc-400">{job.jobCode}</td>
+                        <td className="p-4">
+                          <JobCodeButton jobCode={job.jobCode} onClick={() => setJobDetailJob(job)} />
+                        </td>
                         <td className={`p-4 font-medium ${isExpired ? 'text-red-900 dark:text-red-400' : 'text-zinc-900 dark:text-white'}`}>{job.position}</td>
+                        <td className="p-4 text-zinc-600 dark:text-zinc-400">{job.salaryBudget || 'N/A'}</td>
                         <td className="p-4 text-zinc-600 dark:text-zinc-400">{job.clientName}</td>
                         <td className="p-4 text-zinc-600 dark:text-zinc-400">{job.location}</td>
                         {/* ✅ Added Assigned Date to Table Row */}
@@ -365,6 +436,10 @@ export default function RecruiterAssignments() {
           )}
         </div>
       </div>
+
+      {jobDetailJob && (
+        <JobDetailsModal job={jobDetailJob} onClose={() => setJobDetailJob(null)} />
+      )}
 
       {/* Post / View Requirement Modal */}
       <Modal open={isJobModalOpen} onClose={() => setIsJobModalOpen(false)} maxWidth="max-w-4xl">

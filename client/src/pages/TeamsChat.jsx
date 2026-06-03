@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import io from 'socket.io-client';
+import { getDisplayRole } from '@/context/AuthContext';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
@@ -147,7 +148,7 @@ const NewDMModal = ({ allUsers, myId, existingDMIds, onStart, onClose }) => {
                 <Avatar name={n} size="sm" online />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-800 truncate">{n}</p>
-                  <p className="text-[11px] text-slate-400 capitalize">{u.role}</p>
+                  <p className="text-[11px] text-slate-400 capitalize">{getDisplayRole(u.role)}</p>
                 </div>
                 {has && <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Open</span>}
               </button>
@@ -281,8 +282,8 @@ const ChannelModal = ({ initial, allUsers, currentUserId, onSave, onClose }) => 
                       className={`flex items-center gap-3 w-full px-4 py-2.5 transition-colors text-left ${sel ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
                       <Avatar name={n} size="sm" />
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-slate-800 truncate">{n}</div>
-                        <div className="text-[11px] text-slate-400 capitalize">{u.role}</div>
+                        <span className="text-sm font-medium text-slate-800">{n}</span>
+                        <span className="text-[11px] text-slate-400 capitalize">{getDisplayRole(u.role)}</span>
                       </div>
                       <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors
                         ${sel ? 'bg-blue-500 border-blue-500' : 'border-slate-300'}`}>
@@ -377,7 +378,7 @@ export default function TeamsChat({ role: roleProp }) {
     };
     if (activeDM) return {
       name: activeDM.name,
-      desc: activeDM.role ? activeDM.role.charAt(0).toUpperCase() + activeDM.role.slice(1) : '',
+      desc: getDisplayRole(activeDM.role),
       type: 'dm',
       color: '',
       memberCount: 2,
@@ -508,15 +509,10 @@ export default function TeamsChat({ role: roleProp }) {
     const load = async () => {
       setMsgLoading(true);
       try {
-        const res = await fetch(`${API_URL}/messages`, { headers: getAuthHeader() });
+        // Server now filters by participant — pass ?to= for the specific thread
+        const res = await fetch(`${API_URL}/messages?to=${activeDMId}`, { headers: getAuthHeader() });
         if (res.ok) {
-          const all = await res.json();
-          const thread = all.filter(m =>
-            !m.channelId && (
-              (m.from === myId && m.to === activeDMId) ||
-              (m.from === activeDMId && m.to === myId)
-            )
-          ).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+          const thread = await res.json();
           setMessages(thread);
           // Clear unread
           setDms(prev => prev.map(d => d.id === activeDMId ? { ...d, unread: 0 } : d));
@@ -578,12 +574,15 @@ export default function TeamsChat({ role: roleProp }) {
         ));
       } else {
         // DM via legacy messages endpoint
+        const dmPartner = allUsers.find(u => (u._id || u.id).toString() === activeDMId);
+        const toName = dmPartner ? (buildName(dmPartner) || '') : '';
         const res = await fetch(`${API_URL}/messages`, {
           method: 'POST', headers: getAuthHeader(),
-          body: JSON.stringify({ to: activeDMId, subject: 'Direct Message', content: sentText }),
+          body: JSON.stringify({ to: activeDMId, toName, subject: 'Direct Message', content: sentText }),
         });
         if (!res.ok) throw new Error('Send failed');
         saved = await res.json();
+        // Emit to recipient's socket room
         if (socketRef.current) socketRef.current.emit('send_message', { ...saved, to: activeDMId });
         setDms(prev => prev.map(d =>
           d.id === activeDMId ? { ...d, lastMessage: sentText, lastMessageAt: saved.createdAt } : d
@@ -793,7 +792,7 @@ export default function TeamsChat({ role: roleProp }) {
       {/* ════════════════════════════════════════════════════════════════════
           LEFT SIDEBAR — ash theme
       ════════════════════════════════════════════════════════════════════ */}
-      <div className="w-64 flex-shrink-0 flex flex-col bg-slate-100 border-r border-slate-200">
+      <div className={`flex-shrink-0 flex flex-col bg-slate-100 border-r border-slate-200 ${(activeChannelId || activeDMId) ? 'hidden md:flex w-64' : 'flex w-full md:w-64'}`}>
 
         {/* Header */}
         <div className="px-4 py-3.5 border-b border-slate-200 bg-white">
@@ -804,7 +803,7 @@ export default function TeamsChat({ role: roleProp }) {
               </div>
               <div>
                 <p className="text-sm font-bold text-slate-800 leading-none">Team Chat</p>
-                <p className="text-[11px] text-slate-400 mt-0.5 capitalize">{role}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5 capitalize">{getDisplayRole(role)}</p>
               </div>
             </div>
             {canManage && (
@@ -823,7 +822,7 @@ export default function TeamsChat({ role: roleProp }) {
             <Avatar name={myName} size="sm" online />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-slate-700 truncate leading-none">{myName}</p>
-              <p className="text-[11px] text-slate-400 capitalize mt-0.5">{role}</p>
+              <p className="text-[11px] text-slate-400 capitalize mt-0.5">{getDisplayRole(role)}</p>
             </div>
             {canManage && <Shield className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" title="Admin / Manager" />}
           </div>
@@ -988,13 +987,20 @@ export default function TeamsChat({ role: roleProp }) {
       {/* ════════════════════════════════════════════════════════════════════
           MAIN CHAT AREA
       ════════════════════════════════════════════════════════════════════ */}
-      <div className="flex-1 flex flex-col min-w-0 bg-white">
+      <div className={`flex-1 flex-col min-w-0 bg-white ${(activeChannelId || activeDMId) ? 'flex' : 'hidden md:flex'}`}>
 
         {headerInfo ? (
           <>
             {/* Chat Header */}
-            <div className="flex-shrink-0 flex items-center justify-between px-5 py-3 bg-white border-b border-slate-200">
-              <div className="flex items-center gap-3">
+            <div className="flex-shrink-0 flex items-center justify-between px-3 md:px-5 py-3 bg-white border-b border-slate-200">
+              <div className="flex items-center gap-2 md:gap-3">
+                {/* Mobile back button */}
+                <button 
+                  onClick={() => { setActiveChannelId(null); setActiveDMId(null); }}
+                  className="md:hidden p-2 -ml-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
+                >
+                  <ChevronRight className="w-5 h-5 rotate-180" />
+                </button>
                 {headerInfo.isDM ? (
                   <Avatar name={headerInfo.name} size="md" online />
                 ) : (
@@ -1244,7 +1250,7 @@ export default function TeamsChat({ role: roleProp }) {
                               <span className="text-sm font-medium text-slate-700 truncate">{n}</span>
                               {isCreator && <Crown className="w-3 h-3 text-amber-500 flex-shrink-0" />}
                             </div>
-                            <span className="text-[11px] text-slate-400 capitalize">{m.role}</span>
+                            <span className="text-[11px] text-slate-400 capitalize">{getDisplayRole(m.role)}</span>
                           </div>
                         </div>
                       );

@@ -1,6 +1,7 @@
 // --- START OF FILE messageRoutes.js ---
 import express from 'express';
 import Message from '../models/Message.js';
+import User from '../models/User.js';
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -15,13 +16,30 @@ router.use(protect);
 router.get('/', async (req, res) => {
   try {
     const tenantOwnerId = getTenantOwnerId(req.user);
-    const query = { tenantOwnerId };
+    const userId = req.user._id.toString();
+    let query = { tenantOwnerId };
 
-    // Filter by channel
-    if (req.query.channelId) query.channelId = req.query.channelId;
+    if (req.query.channelId) {
+      // ── Channel messages ───────────────────────────────────────────────────
+      query.channelId = req.query.channelId;
+    } else {
+      // ── DM messages — always exclude channel messages ──────────────────────
+      query.channelId = null;
 
-    // Filter by DM recipient
-    if (req.query.to) query.to = req.query.to;
+      if (req.query.to) {
+        // Load a specific DM thread (both directions)
+        query.$or = [
+          { from: userId,          to: req.query.to },
+          { from: req.query.to,    to: userId       },
+        ];
+      } else {
+        // Load all DMs involving current user (for sidebar / initial load)
+        query.$or = [
+          { from: userId },
+          { to:   userId },
+        ];
+      }
+    }
 
     const messages = await Message.find(query)
       .populate('senderId', 'firstName lastName profilePicture')
@@ -40,11 +58,24 @@ router.post('/', async (req, res) => {
   try {
     const tenantOwnerId = getTenantOwnerId(req.user);
 
+    const senderName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || req.user.email;
+    let toName = '';
+    
+    if (req.body.to) {
+      const toUser = await User.findById(req.body.to).select('firstName lastName email');
+      if (toUser) {
+        toName = `${toUser.firstName || ''} ${toUser.lastName || ''}`.trim() || toUser.email;
+      }
+    }
+
     const message = await Message.create({
       ...req.body,
       tenantOwnerId,
       senderId:   req.user._id,
-      senderName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || req.user.email,
+      senderName: senderName,
+      from:       req.user._id.toString(),
+      fromName:   senderName,
+      ...(toName && { toName }),
     });
     res.status(201).json(message);
   } catch (error) {

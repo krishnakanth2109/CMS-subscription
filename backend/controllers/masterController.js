@@ -89,3 +89,27 @@ export const updateManager = async (req, res) => {
     res.status(500).json({ message: 'Error updating manager.' });
   }
 };
+
+// @desc    Delete a Manager/Admin account
+// @route   DELETE /api/master/managers/:id
+// @access  Private (Master only)
+export const deleteManager = async (req, res) => {
+  try {
+    const manager = await User.findById(req.params.id);
+    if (!manager) return res.status(404).json({ message: 'Manager not found.' });
+    if (manager.role !== 'manager') return res.status(400).json({ message: 'User is not a manager.' });
+
+    if (manager.firebaseUid) {
+      try {
+        await admin.auth().deleteUser(manager.firebaseUid);
+      } catch (error) {
+        console.error('Firebase delete (non-fatal):', error.message);
+      }
+    }
+
+    await manager.deleteOne();
+    res.json({ message: 'Manager deleted successfully', id: req.params.id });
+  } catch (error) {
+    res.status(500).json({ message: 'Error deleting manager.' });
+  }
+};

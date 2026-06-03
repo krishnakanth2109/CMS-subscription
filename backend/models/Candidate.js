@@ -126,37 +126,6 @@ candidateSchema.pre('save', async function (next) {
     console.error('Candidate ID generation error:', error);
   }
 
-  // ── Client-Specific ID Generation (e.g., INF001) ──────────────────────────
-  try {
-    if (this.client && (this.isNew || this.isModified('client'))) {
-      const ClientModel = mongoose.model('Client');
-      const clientDoc = await ClientModel.findOne({
-        tenantOwnerId: this.tenantOwnerId,
-        companyName: this.client
-      }).lean();
-
-      if (clientDoc && clientDoc.companyCode) {
-        const code = clientDoc.companyCode.toUpperCase();
-        // Find the highest sequence for this specific company code within this tenant
-        const lastCandidate = await this.constructor.findOne({
-          tenantOwnerId: this.tenantOwnerId,
-          clientCandidateId: { $regex: new RegExp(`^${code}`) }
-        }).sort({ clientCandidateId: -1 }).lean();
-
-        let nextNum = 1;
-        if (lastCandidate && lastCandidate.clientCandidateId) {
-          const numPart = lastCandidate.clientCandidateId.replace(code, '');
-          const lastNum = parseInt(numPart, 10);
-          if (!isNaN(lastNum)) nextNum = lastNum + 1;
-        }
-
-        this.clientCandidateId = `${code}${nextNum.toString().padStart(3, '0')}`;
-      }
-    }
-  } catch (err) {
-    console.error('Client candidate ID generation error:', err);
-  }
-
   next();
 });
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { generatePdfWithTemplate } from '@/utils/pdfTemplateGenerator';
+import { useAuth } from '@/context/AuthContext';
 import {
     Sparkles, X, UploadCloud, FileText, Send,
     Download, AlignLeft, AlignCenter, AlignRight, Pencil
@@ -137,6 +138,7 @@ const EditableContent = ({ initialContent, onChange }) => {
 };
 
 const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
+    const { getIdToken } = useAuth();
     const API_URL = apiUrl;
     const [letterType, setLetterType] = useState('Agreement');
     const [generatedContent, setGeneratedContent] = useState('');
@@ -167,8 +169,12 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
         formData.append('file', file);
         try {
             setLoading(true);
+            const token = await getIdToken();
             const res = await fetch(`${API_URL}/upload/template-pdf`, {
                 method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`
+                },
                 body: formData
             });
             const data = await res.json();
@@ -239,30 +245,35 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
         return () => clearTimeout(timer);
     }, [generatedContent, selectedTemplate]);
 
-    const handleGenerate = () => {
+    const handleGenerate = async () => {
         setLoading(true);
         setPdfUrl(null);
-        fetch(`${API_URL}/agreement-letters/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                employee_id: employee.id,
-                letter_type: letterType,
-                tone: "Professional",
-                company_name: companyName
-            })
-        })
-            .then(res => res.json())
-            .then(async data => {
-                setGeneratedContent(data.content);
-                setLoading(false);
-                await generatePreview(data.content);
-            })
-            .catch(err => {
-                console.error("Error generating letter:", err);
-                setLoading(false);
-                setGeneratedContent("Error: Could not connect to API Service.");
+        try {
+            const token = await getIdToken();
+            const res = await fetch(`${API_URL}/agreement-letters/generate`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    employee_id: employee.id,
+                    letter_type: letterType,
+                    tone: "Professional",
+                    company_name: companyName
+                })
             });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || "Generation failed");
+            
+            setGeneratedContent(data.content);
+            setLoading(false);
+            await generatePreview(data.content);
+        } catch (err) {
+            console.error("Error generating letter:", err);
+            setLoading(false);
+            setGeneratedContent("Error: Could not connect to API Service.");
+        }
     };
 
     const generatePreview = async (htmlContent) => {
@@ -295,9 +306,13 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
         if (btn) { btn.innerText = 'Processing...'; btn.disabled = true; }
 
         try {
+            const token = await getIdToken();
             const res = await fetch(`${API_URL}/agreement-letters/download-docx`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     html_content: generatedContent
                 })
@@ -333,10 +348,14 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
         btn.disabled = true;
 
         try {
+            const token = await getIdToken();
             const subject = `${letterType} - ${employee.name}`;
             const res = await fetch(`${API_URL}/agreement-email/send`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     employee_id: employee.id,
                     letter_content: generatedContent,

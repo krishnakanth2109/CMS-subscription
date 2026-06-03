@@ -280,7 +280,7 @@ export default function AgreementGenerator() {
         )}
 
         {/* New Company */}
-        <button onClick={() => { setSelectedCompanyForEdit(null); setIsViewOnly(false); setIsCompanyModalOpen(true); }} style={{ background: 'var(--ag-accent-color)', color: 'white', border: 'none', padding: '8px 14px', borderRadius: '10px', fontWeight: 700, fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(40, 48, 134, 0.3)' }}><Plus size={14} /> New Company</button>
+        <button onClick={() => { setSelectedCompanyForEdit(null); setIsViewOnly(false); setIsCompanyModalOpen(true); }} style={{ background: 'var(--ag-accent-color)', color: 'white', border: 'none', padding: '8px 14px', borderRadius: '10px', fontWeight: 700, fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(40, 48, 134, 0.3)' }}><Plus size={14} /> Add Company</button>
 
         {/* Download Template */}
         <button

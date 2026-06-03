@@ -33,10 +33,14 @@ export const loginUser = async (req, res) => {
     }
 
     let candidateSettings = user.candidateSettings || { hiddenFields: [], customFields: [] };
+    let clientSettings = user.clientSettings || { hiddenFields: [], customFields: [] };
+    let requirementSettings = user.requirementSettings || { hiddenFields: [], customFields: [] };
     if (user.role !== 'manager' && user.tenantOwnerId) {
-      const manager = await User.findById(user.tenantOwnerId).select('candidateSettings');
-      if (manager && manager.candidateSettings) {
-        candidateSettings = manager.candidateSettings;
+      const manager = await User.findById(user.tenantOwnerId).select('candidateSettings clientSettings requirementSettings');
+      if (manager) {
+        if (manager.candidateSettings) candidateSettings = manager.candidateSettings;
+        if (manager.clientSettings) clientSettings = manager.clientSettings;
+        if (manager.requirementSettings) requirementSettings = manager.requirementSettings;
       }
     }
 
@@ -59,6 +63,8 @@ export const loginUser = async (req, res) => {
       subscriptionDaysLeft,
       phone: user.phone,
       candidateSettings, // Send fields payload
+      clientSettings,
+      requirementSettings,
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error during login.' });
@@ -116,6 +122,7 @@ export const registerUser = async (req, res) => {
       subscriptionPlan: user.subscriptionPlan,
       subscriptionExpiresAt: user.subscriptionExpiresAt,
       candidateSettings: user.candidateSettings,
+      clientSettings: user.clientSettings,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -131,10 +138,14 @@ export const getUserProfile = async (req, res) => {
       }
 
       let candidateSettings = req.user.candidateSettings || { hiddenFields: [], customFields: [] };
+      let clientSettings = req.user.clientSettings || { hiddenFields: [], customFields: [] };
+      let requirementSettings = req.user.requirementSettings || { hiddenFields: [], customFields: [] };
       if (req.user.role !== 'manager' && req.user.tenantOwnerId) {
-        const manager = await User.findById(req.user.tenantOwnerId).select('candidateSettings');
-        if (manager && manager.candidateSettings) {
-          candidateSettings = manager.candidateSettings;
+        const manager = await User.findById(req.user.tenantOwnerId).select('candidateSettings clientSettings requirementSettings');
+        if (manager) {
+          if (manager.candidateSettings && (!req.user.candidateSettings || !req.user.candidateSettings.hiddenFields || req.user.candidateSettings.hiddenFields.length === 0)) candidateSettings = manager.candidateSettings;
+          if (manager.clientSettings && (!req.user.clientSettings || !req.user.clientSettings.hiddenFields || req.user.clientSettings.hiddenFields.length === 0)) clientSettings = manager.clientSettings;
+          if (manager.requirementSettings && (!req.user.requirementSettings || !req.user.requirementSettings.hiddenFields || req.user.requirementSettings.hiddenFields.length === 0)) requirementSettings = manager.requirementSettings;
         }
       }
 
@@ -156,6 +167,8 @@ export const getUserProfile = async (req, res) => {
         subscriptionDaysLeft,
         phone: req.user.phone,
         candidateSettings,
+        clientSettings,
+        requirementSettings,
         candidatePrefix: req.user.candidatePrefix || 'CAND',
       });
     } else {
@@ -181,12 +194,21 @@ export const updateUserProfile = async (req, res) => {
     if (req.body.profilePicture !== undefined) user.profilePicture = req.body.profilePicture;
     if (req.body.phone !== undefined) user.phone = req.body.phone;
     
+    if (req.body.companyName !== undefined && (user.role === 'admin' || user.role === 'manager')) {
+      user.companyName = req.body.companyName;
+    }
+    
+    if (req.body.candidateSettings !== undefined) {
+      user.candidateSettings = req.body.candidateSettings;
+    }
+    if (req.body.clientSettings !== undefined) {
+      user.clientSettings = req.body.clientSettings;
+    }
+    if (req.body.requirementSettings !== undefined) {
+      user.requirementSettings = req.body.requirementSettings;
+    }
+
     if (user.role === 'manager' || user.role === 'admin') {
-      if (req.body.companyName !== undefined) user.companyName = req.body.companyName;
-      // Allow managers to save custom form fields
-      if (req.body.candidateSettings !== undefined) {
-        user.candidateSettings = req.body.candidateSettings;
-      }
       // Allow managers to update the candidate ID prefix
       if (req.body.candidatePrefix !== undefined) {
         const p = req.body.candidatePrefix.toString().toUpperCase().replace(/[^A-Z]/g, '').substring(0, 4);
@@ -208,6 +230,8 @@ export const updateUserProfile = async (req, res) => {
       phone: updatedUser.phone,
       companyName: updatedUser.companyName,
       candidateSettings: updatedUser.candidateSettings,
+      clientSettings: updatedUser.clientSettings,
+      requirementSettings: updatedUser.requirementSettings,
       candidatePrefix: updatedUser.candidatePrefix || 'CAND',
     });
   } catch (error) {

@@ -25,6 +25,8 @@ import messageRoutes   from './routes/messageRoutes.js';
 import channelRoutes   from './routes/channelRoutes.js';
 import aiMockRoutes    from './routes/aiMockRoutes.js';
 import paymentRoutes   from './routes/paymentRoutes.js';   // 🔹 NEW
+import submissionRoutes from './routes/submissionRoutes.js';
+
 
 // ── Agreement Module ──────────────────────────────────────────────────────────
 import { connectAgreementDB }   from './config/agreementDatabase.js';
@@ -142,6 +144,8 @@ app.use('/api/messages',   messageRoutes);
 app.use('/api/channels',   channelRoutes);
 app.use('/api/ai-mock',    aiMockRoutes);
 app.use('/api/payments',   paymentRoutes);
+app.use('/api/submissions', submissionRoutes);
+
 
 // Agreement module
 app.use('/agreement-companies', protect, agreementCompanyRoutes);
@@ -163,7 +167,9 @@ app.use('/messages',   messageRoutes);
 app.use('/channels',   channelRoutes);
 app.use('/ai-mock',    aiMockRoutes);
 app.use('/payments',   paymentRoutes);    // 🔹 FIXED: Added missing payment fallback
+app.use('/submissions', submissionRoutes);
 app.use('/master',     masterRoutes);     // 🔹 FIXED: Added missing master fallback
+
 app.use('/',           aiMockRoutes);
 
 // ═══════════════════════════════════════════════════════════════════════════════

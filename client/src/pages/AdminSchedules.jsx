@@ -3,10 +3,12 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { 
   Bell, Calendar, Clock, User, Trash2, Loader2, Plus, 
-  Briefcase, AlertCircle, Filter 
+  Briefcase, AlertCircle, Filter, Search, ChevronDown, Check
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+
+
 
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
 const API_URL  = BASE_URL.endsWith('/api') ? BASE_URL : `${BASE_URL}/api`;
@@ -20,6 +22,146 @@ function getFirebaseToken() {
   } catch {
     return null;
   }
+}
+
+function SearchableCandidateDropdown({
+  candidates = [],
+  selectedValue = "",
+  onChange,
+  placeholder = "Select Candidate...",
+  error = "",
+  className = "",
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const dropdownRef = React.useRef(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  // Reset search query when dropdown opens/closes
+  useEffect(() => {
+    if (isOpen) {
+      setSearchQuery("");
+    }
+  }, [isOpen]);
+
+  const selectedCandidate = candidates.find(
+    (c) => (c._id || c.id) === selectedValue
+  );
+
+  const filteredCandidates = candidates.filter((c) => {
+    const name = (c.name || `${c.firstName || ""} ${c.lastName || ""}`).toLowerCase();
+    const email = (c.email || "").toLowerCase();
+    const position = (c.position || "").toLowerCase();
+    const query = searchQuery.toLowerCase();
+    return name.includes(query) || email.includes(query) || position.includes(query);
+  });
+
+  const handleSelect = (candidateId) => {
+    if (onChange) {
+      onChange({ target: { value: candidateId } });
+    }
+    setIsOpen(false);
+  };
+
+  const getCandidateDisplay = (c) => {
+    return c.name || `${c.firstName || ""} ${c.lastName || ""}` || "Unknown Candidate";
+  };
+
+  return (
+    <div className={`relative w-full ${className}`} ref={dropdownRef}>
+      {/* Dropdown Trigger */}
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full flex items-center justify-between px-3 py-2.5 text-left border rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white transition-all outline-none focus:ring-2 focus:ring-indigo-500 ${
+          error ? "border-red-500" : "border-slate-200 dark:border-slate-700"
+        }`}
+      >
+        <span className="truncate flex items-center gap-2">
+          <User className="h-4 w-4 text-gray-400 shrink-0" />
+          {selectedCandidate ? (
+            <span className="font-medium text-gray-900 dark:text-white">
+              {getCandidateDisplay(selectedCandidate)} {selectedCandidate.position ? `(${selectedCandidate.position})` : ""}
+            </span>
+          ) : (
+            <span className="text-gray-400 dark:text-gray-400">{placeholder}</span>
+          )}
+        </span>
+        <ChevronDown className="h-4 w-4 text-gray-400 shrink-0 ml-2" />
+      </button>
+
+      {/* Dropdown Menu */}
+      {isOpen && (
+        <div className="absolute z-[70] w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-100">
+          {/* Search Input Box */}
+          <div className="relative p-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+            <Search className="absolute left-4 top-4 h-4 w-4 text-gray-400" />
+            <input
+              type="text"
+              autoFocus
+              className="w-full pl-9 pr-4 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-indigo-500"
+              placeholder="Search by name, position, or email..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          {/* Candidates List */}
+          <div className="max-h-60 overflow-y-auto p-1 space-y-0.5">
+            {filteredCandidates.length === 0 ? (
+              <div className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 text-center">
+                No candidates found
+              </div>
+            ) : (
+              filteredCandidates.map((c) => {
+                const candidateId = c._id || c.id;
+                const isSelected = candidateId === selectedValue;
+                const displayName = getCandidateDisplay(c);
+                const subText = c.position || c.email || "";
+
+                return (
+                  <button
+                    key={candidateId}
+                    type="button"
+                    onClick={() => handleSelect(candidateId)}
+                    className={`w-full flex items-center justify-between px-3 py-2 text-left rounded-md text-sm transition-colors ${
+                      isSelected
+                        ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-medium"
+                        : "hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold truncate">{displayName}</div>
+                      {subText && (
+                        <div className="text-xs text-gray-400 dark:text-gray-400 truncate mt-0.5">
+                          {c.position ? `${c.position}` : ""}
+                          {c.position && c.email ? " • " : ""}
+                          {c.email ? `${c.email}` : ""}
+                        </div>
+                      )}
+                    </div>
+                    {isSelected && <Check className="h-4 w-4 text-blue-500 dark:text-blue-400 ml-2 shrink-0" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function buildHeaders() {
@@ -201,21 +343,12 @@ export default function AdminSchedules() {
                 {/* Candidate Select */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Candidate</label>
-                  <div className="relative">
-                     <User className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                     <select 
-                       value={selectedCandidateId}
-                       onChange={(e) => setSelectedCandidateId(e.target.value)}
-                       className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white"
-                     >
-                       <option value="">Select Candidate...</option>
-                       {candidates.map(c => (
-                         <option key={c._id} value={c._id}>
-                           {c.name || `${c.firstName || ''} ${c.lastName || ''}`} - {c.position || 'N/A'}
-                         </option>
-                       ))}
-                     </select>
-                  </div>
+                  <SearchableCandidateDropdown
+                    candidates={candidates}
+                    selectedValue={selectedCandidateId}
+                    onChange={(e) => setSelectedCandidateId(e.target.value)}
+                    placeholder="Select Candidate..."
+                  />
                 </div>
 
                 {/* Date Picker */}

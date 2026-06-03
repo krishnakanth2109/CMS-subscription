@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { X, Check, Zap, Crown, Sparkles, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { auth } from './firebase'; // ✅ Pre-initialized singleton — no getAuth() needed
 
 const PLANS = [
   {
@@ -11,7 +10,6 @@ const PLANS = [
     price: { monthly: 0, yearly: 0 },
     duration: '7 days',
     color: 'from-slate-500 to-slate-600',
-    borderColor: 'border-slate-200',
     badgeColor: 'bg-slate-100 text-slate-600',
     features: [
       'Dashboard',
@@ -30,7 +28,6 @@ const PLANS = [
     price: { monthly: 1999, yearly: 19999 },
     duration: '30 days',
     color: 'from-blue-500 to-indigo-600',
-    borderColor: 'border-blue-400',
     badgeColor: 'bg-blue-100 text-blue-700',
     popular: true,
     features: [
@@ -52,7 +49,6 @@ const PLANS = [
     price: { monthly: 4999, yearly: 49999 },
     duration: '30 days',
     color: 'from-amber-500 to-orange-600',
-    borderColor: 'border-amber-400',
     badgeColor: 'bg-amber-100 text-amber-700',
     features: [
       'Everything in Flexi, plus:',
@@ -67,7 +63,6 @@ const PLANS = [
   },
 ];
 
-// ─── Safe fetch ────────────────────────────────────────────────────────────────
 async function safeFetch(url, options) {
   let res;
   try {
@@ -92,7 +87,7 @@ async function safeFetch(url, options) {
 }
 
 export default function UpgradePlanModal({ isOpen, onClose, currentPlan }) {
-  const { refreshUser } = useAuth();
+  const { refreshUser, getIdToken } = useAuth();
   const [billing, setBilling] = useState('monthly');
   const [loading, setLoading] = useState(null);
   const [error, setError]     = useState('');
@@ -101,9 +96,6 @@ export default function UpgradePlanModal({ isOpen, onClose, currentPlan }) {
 
   if (!isOpen) return null;
 
-  // ✅ Uses the imported singleton — no dynamic import, no getAuth(), no uninitialized app
-  const getAuthToken = () => auth.currentUser?.getIdToken();
-
   const handleSelectPlan = async (plan) => {
     if (plan.key === 'Basic' || plan.key === currentPlan) return;
 
@@ -111,10 +103,9 @@ export default function UpgradePlanModal({ isOpen, onClose, currentPlan }) {
     setError('');
 
     try {
-      const token = await getAuthToken();
+      const token = await getIdToken();
       if (!token) throw new Error('Session expired. Please log in again.');
 
-      // 1. Create Razorpay order
       const orderData = await safeFetch(`${API_URL}/payments/create-order`, {
         method: 'POST',
         headers: {
@@ -124,7 +115,6 @@ export default function UpgradePlanModal({ isOpen, onClose, currentPlan }) {
         body: JSON.stringify({ plan: plan.key, billing }),
       });
 
-      // 2. Load Razorpay SDK if needed
       if (!window.Razorpay) {
         await new Promise((resolve, reject) => {
           const script   = document.createElement('script');
@@ -135,7 +125,6 @@ export default function UpgradePlanModal({ isOpen, onClose, currentPlan }) {
         });
       }
 
-      // 3. Open Razorpay checkout
       const options = {
         key:         orderData.keyId,
         amount:      orderData.amount,
@@ -153,7 +142,6 @@ export default function UpgradePlanModal({ isOpen, onClose, currentPlan }) {
           ondismiss: () => setLoading(null),
         },
         handler: async (response) => {
-          // 4. Verify payment
           try {
             await safeFetch(`${API_URL}/payments/verify`, {
               method: 'POST',
@@ -170,7 +158,6 @@ export default function UpgradePlanModal({ isOpen, onClose, currentPlan }) {
               }),
             });
 
-            // 5. Refresh user so sidebar/plan badge updates immediately
             if (refreshUser) await refreshUser();
             onClose();
           } catch (err) {
@@ -191,144 +178,173 @@ export default function UpgradePlanModal({ isOpen, onClose, currentPlan }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-
-        {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-slate-100 px-8 py-5 flex items-center justify-between rounded-t-3xl z-10">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900">Upgrade Your Plan</h2>
-            <p className="text-sm text-slate-500 mt-0.5">Choose the plan that fits your team</p>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-2 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-slate-50 rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-5xl max-h-[98vh] flex flex-col relative animate-in zoom-in-95 duration-200 border border-slate-200/50 overflow-hidden">
+        
+        {/* Header - Compact */}
+        <div className="z-30 shrink-0 flex items-center justify-between px-5 py-3 sm:px-8 sm:py-4 bg-white border-b border-slate-200/80">
+          <div className="flex items-center gap-4">
+            <div className="bg-gradient-to-br from-indigo-500 to-blue-600 w-10 h-10 rounded-xl flex items-center justify-center shadow-inner hidden sm:flex">
+              <Crown className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+                Upgrade Plan
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">Unlock powerful tools for your recruitment team.</p>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-8">
-          {/* Billing Toggle */}
-          <div className="flex justify-center mb-8">
-            <div className="bg-slate-100 rounded-xl p-1 flex gap-1">
+        <div className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col overflow-y-auto">
+          {/* Billing Toggle - Compact */}
+          <div className="flex justify-center mb-6">
+            <div className="bg-slate-200/70 p-1 rounded-xl flex gap-1 border border-slate-300/50 shadow-inner">
               <button
                 onClick={() => setBilling('monthly')}
-                className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+                className={`px-5 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all duration-200 ${
                   billing === 'monthly'
                     ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200'
                 }`}
               >
                 Monthly
               </button>
               <button
                 onClick={() => setBilling('yearly')}
-                className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${
+                className={`px-5 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all duration-200 flex items-center gap-1.5 ${
                   billing === 'yearly'
                     ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200'
                 }`}
               >
                 Yearly
-                <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                  SAVE 16%
+                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider ${billing === 'yearly' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-300 text-slate-600'}`}>
+                  Save 16%
                 </span>
               </button>
             </div>
           </div>
 
-          {/* Error */}
           {error && (
-            <div className="mb-6 p-3 bg-red-50 border border-red-100 rounded-xl flex items-start gap-2 text-red-600 text-sm">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 rounded-r-lg flex items-center gap-2 text-red-700 text-xs font-medium">
+              <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
-          {/* Plan Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {/* Cards Grid - Tighter Layout */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-5 flex-1">
             {PLANS.map((plan) => {
               const Icon      = plan.icon;
               const isCurrent = plan.key === currentPlan;
               const isLoading = loading === plan.key;
               const price     = billing === 'yearly' ? plan.price.yearly : plan.price.monthly;
+              const isPopular = plan.popular;
+              const isPremium = plan.key === 'Enterprise';
 
               return (
                 <div
                   key={plan.key}
-                  className={`relative flex flex-col rounded-2xl border-2 overflow-hidden transition-all ${
-                    plan.popular
-                      ? 'border-blue-400 shadow-lg shadow-blue-100'
-                      : plan.borderColor
-                  } ${isCurrent ? 'opacity-80' : ''}`}
+                  className={`relative flex flex-col rounded-2xl border transition-all duration-200 ${
+                    isPopular
+                      ? 'border-blue-500 bg-white shadow-xl shadow-blue-500/10 md:-translate-y-2'
+                      : isPremium
+                      ? 'border-slate-800 bg-slate-900 shadow-lg'
+                      : 'border-slate-200 bg-white shadow-md'
+                  } ${isCurrent ? 'ring-2 ring-emerald-500 ring-offset-2 opacity-95' : 'hover:-translate-y-1'}`}
                 >
-                  {/* Popular badge */}
-                  {plan.popular && (
-                    <div className="absolute top-0 left-0 right-0 bg-gradient-to-r from-blue-500 to-indigo-600 text-white text-xs font-bold text-center py-1 tracking-wider">
-                      MOST POPULAR
+                  {isPopular && (
+                    <div className="absolute -top-3 inset-x-0 flex justify-center z-10">
+                      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[10px] font-black px-3 py-1 rounded-full shadow-md uppercase tracking-widest">
+                        Most Popular
+                      </div>
                     </div>
                   )}
 
-                  <div className={`p-6 ${plan.popular ? 'mt-6' : ''}`}>
-                    {/* Icon + Name */}
+                  {isCurrent && (
+                    <div className="absolute top-3 right-3 z-10">
+                      <div className="bg-emerald-100 text-emerald-700 text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 uppercase tracking-wider border border-emerald-200">
+                        <Check className="w-2.5 h-2.5" /> Active
+                      </div>
+                    </div>
+                  )}
+
+                  <div className={`p-5 lg:p-6 ${isPopular ? 'pt-7' : ''} flex-1 flex flex-col`}>
+                    {/* Card Header */}
                     <div className="flex items-center gap-3 mb-4">
-                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${plan.color} flex items-center justify-center`}>
-                        <Icon className="w-5 h-5 text-white" />
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                        isPremium ? 'bg-slate-800 border border-slate-700' : `bg-gradient-to-br ${plan.color}`
+                      }`}>
+                        <Icon className={`w-5 h-5 ${isPremium ? 'text-amber-400' : 'text-white'}`} />
                       </div>
                       <div>
-                        <p className="font-bold text-slate-900 text-lg">{plan.name}</p>
-                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${plan.badgeColor}`}>
+                        <p className={`text-lg font-black leading-tight ${isPremium ? 'text-white' : 'text-slate-900'}`}>{plan.name}</p>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md mt-1 inline-block ${
+                          isPremium ? 'bg-slate-800 text-slate-300' : plan.badgeColor
+                        }`}>
                           {plan.key === 'Basic' ? '7-day trial' : billing === 'yearly' ? 'Annual' : 'Monthly'}
                         </span>
                       </div>
                     </div>
 
                     {/* Price */}
-                    <div className="mb-5">
+                    <div className="mb-5 pb-5 border-b border-slate-200/50 border-dashed">
                       {price === 0 ? (
-                        <p className="text-3xl font-extrabold text-slate-900">Free</p>
+                        <p className={`text-3xl font-black ${isPremium ? 'text-white' : 'text-slate-900'}`}>Free</p>
                       ) : (
                         <div className="flex items-end gap-1">
-                          <span className="text-sm text-slate-500 mb-1">₹</span>
-                          <span className="text-3xl font-extrabold text-slate-900">
+                          <span className={`text-sm font-bold mb-1 ${isPremium ? 'text-slate-400' : 'text-slate-500'}`}>₹</span>
+                          <span className={`text-3xl font-black tracking-tight leading-none ${isPremium ? 'text-white' : 'text-slate-900'}`}>
                             {price.toLocaleString('en-IN')}
                           </span>
-                          <span className="text-slate-400 text-sm mb-1">
+                          <span className={`text-xs font-semibold mb-0.5 ${isPremium ? 'text-slate-500' : 'text-slate-400'}`}>
                             /{billing === 'yearly' ? 'yr' : 'mo'}
                           </span>
                         </div>
                       )}
                     </div>
 
-                    {/* Features */}
-                    <ul className="space-y-2 mb-6">
+                    {/* Features List */}
+                    <ul className="space-y-2 mb-6 flex-1">
                       {plan.features.map((f) => (
-                        <li key={f} className="flex items-start gap-2 text-sm text-slate-700">
-                          <Check className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" />
+                        <li key={f} className={`flex items-start gap-2.5 text-xs font-semibold ${isPremium ? 'text-slate-300' : 'text-slate-700'}`}>
+                          <div className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${isPremium ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-100 text-emerald-600'}`}>
+                            <Check className="w-2.5 h-2.5 stroke-[3px]" />
+                          </div>
                           {f}
                         </li>
                       ))}
                       {plan.locked.map((f) => (
-                        <li key={f} className="flex items-start gap-2 text-sm text-slate-400 line-through">
-                          <X className="w-4 h-4 text-slate-300 mt-0.5 flex-shrink-0" />
+                        <li key={f} className="flex items-start gap-2.5 text-xs font-medium text-slate-400 line-through">
+                          <div className="mt-0.5 w-4 h-4 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center shrink-0">
+                            <X className="w-2.5 h-2.5 stroke-[3px]" />
+                          </div>
                           {f}
                         </li>
                       ))}
                     </ul>
 
-                    {/* CTA Button */}
+                    {/* Action Button */}
                     <button
                       onClick={() => handleSelectPlan(plan)}
                       disabled={isCurrent || isLoading || plan.key === 'Basic'}
-                      className={`w-full py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
+                      className={`w-full py-2.5 rounded-xl font-bold text-sm transition-all duration-200 flex items-center justify-center gap-2 ${
                         isCurrent
                           ? 'bg-slate-100 text-slate-400 cursor-default'
                           : plan.key === 'Basic'
                           ? 'bg-slate-100 text-slate-400 cursor-default'
-                          : plan.popular
-                          ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white hover:shadow-lg hover:shadow-blue-200 hover:-translate-y-0.5'
-                          : `bg-gradient-to-r ${plan.color} text-white hover:shadow-lg hover:-translate-y-0.5`
+                          : isPremium
+                          ? 'bg-amber-500 hover:bg-amber-400 text-slate-900 shadow-md shadow-amber-500/20 hover:scale-[1.02]'
+                          : isPopular
+                          ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-500/30 hover:scale-[1.02]'
+                          : 'bg-slate-900 hover:bg-slate-800 text-white shadow-md shadow-slate-900/20 hover:scale-[1.02]'
                       }`}
                     >
                       {isLoading ? (
@@ -339,9 +355,9 @@ export default function UpgradePlanModal({ isOpen, onClose, currentPlan }) {
                       ) : isCurrent ? (
                         'Current Plan'
                       ) : plan.key === 'Basic' ? (
-                        'Free Trial'
+                        'Included'
                       ) : (
-                        `Upgrade to ${plan.name}`
+                        `Choose Plan`
                       )}
                     </button>
                   </div>
@@ -350,8 +366,8 @@ export default function UpgradePlanModal({ isOpen, onClose, currentPlan }) {
             })}
           </div>
 
-          <p className="text-center text-xs text-slate-400 mt-6">
-            Payments are processed securely via Razorpay · All prices in INR · Cancel anytime
+          <p className="text-center text-[10px] font-bold text-slate-400 mt-6 uppercase tracking-widest">
+            Secure payments via Razorpay • Cancel anytime
           </p>
         </div>
       </div>

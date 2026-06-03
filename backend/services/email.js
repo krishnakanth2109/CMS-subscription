@@ -56,23 +56,23 @@ import PDFDocument from 'pdfkit';
 async function generatePdfBase64(text, title = "Job Description") {
   return new Promise((resolve, reject) => {
     try {
-       const doc = new PDFDocument({ margin: 50 });
-       const chunks = [];
-       doc.on('data', chunk => chunks.push(chunk));
-       doc.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
-       
-       // PDF Content
-       doc.fillColor('#6366f1').fontSize(24).font('Helvetica-Bold').text(title, { align: 'center' });
-       doc.moveDown(1);
-       doc.strokeColor('#e2e8f0').lineWidth(1).moveTo(50, doc.y).lineTo(550, doc.y).stroke();
-       doc.moveDown(1.5);
-       
-       doc.fillColor('#334155').fontSize(11).font('Helvetica').text(text, {
-         align: 'left',
-         lineGap: 5
-       });
-       
-       doc.end();
+      const doc = new PDFDocument({ margin: 50 });
+      const chunks = [];
+      doc.on('data', chunk => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
+
+      // PDF Content
+      doc.fillColor('#6366f1').fontSize(24).font('Helvetica-Bold').text(title, { align: 'center' });
+      doc.moveDown(1);
+      doc.strokeColor('#e2e8f0').lineWidth(1).moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+      doc.moveDown(1.5);
+
+      doc.fillColor('#334155').fontSize(11).font('Helvetica').text(text, {
+        align: 'left',
+        lineGap: 5
+      });
+
+      doc.end();
     } catch (e) {
       reject(e);
     }
@@ -81,13 +81,13 @@ async function generatePdfBase64(text, title = "Job Description") {
 
 async function sendInterviewEmail({ candidateEmail, candidateName, linkUrl, duration, jobDescription, resumeText }) {
   const baseUrl = process.env.FRONTEND_URL || "http://localhost:5000";
-  
+
   // Decide which text to use for the PDF
   // If jobDescription is not "JD provided via attached file", use it.
   // Otherwise, use resumeText (which contains the parsed PDF text).
   const isGenericJdStr = String(jobDescription || "").includes("JD provided via attached file");
   const finalJdText = isGenericJdStr ? (resumeText || jobDescription) : (jobDescription || resumeText);
-  
+
   let attachments = [];
   if (finalJdText) {
     try {
@@ -230,9 +230,9 @@ async function sendDecisionEmail({ email, name, decision, overallRecommendation,
   });
 }
 
-export { 
+export {
   sendBrevoEmail,
   sendDecisionEmail,
   sendInterviewEmail,
   sendOtpEmail
- };
+};

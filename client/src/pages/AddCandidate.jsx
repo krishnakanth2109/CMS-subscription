@@ -6,9 +6,181 @@ import {
   ArrowUpDown, ArrowUp, ArrowDown, Users, Download,
   X, Edit, Trash2, Calendar, ChevronDown,
   CheckCircle2, FileText, Sparkles, Settings2, Check, GripVertical,
-  Clock, Ban
+  Clock, Ban, FileSpreadsheet, Building, Award, Briefcase
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+
+// ── Inline Excel Import Logic ─────────────────────────────────────────────────
+const _FIELD_ALIASES = {
+  firstName: ['first name','firstname','first_name','given name','givenname','candidate name','name','full name','fullname','candidate_name'],
+  lastName:  ['last name','lastname','last_name','surname','family name','familyname'],
+  email:     ['email','email address','emailaddress','e-mail','e_mail','mail','email id','emailid'],
+  contact:   ['phone','phone number','phonenumber','mobile','mobile number','mobilenumber','contact','contact number','contactnumber','mobileno','phoneno','cellphone','cell','contactno'],
+  alternateNumber: ['alternate number','alternatenumber','alternate phone','alternate mobile','alt number','altnumber','alt phone','secondary phone','secondaryphone','other number','othernumber'],
+  dateOfBirth: ['date of birth','dateofbirth','dob','birth date','birthdate','birthday','date of birth (dd/mm/yyyy)','dob (dd/mm/yyyy)'],
+  gender:     ['gender','sex'],
+  linkedin:   ['linkedin','linkedin url','linkedinurl','linkedin profile','linkedinprofile','linkedin id','linkedinid'],
+  currentLocation:   ['current location','currentlocation','location','city','present location','presentlocation','place','loc'],
+  preferredLocation: ['preferred location','preferredlocation','preferred city','preferredcity','pref location','preflocation','job city','jobcity'],
+  position: ['position','position applied','positionapplied','role','job title','jobtitle','designation','jobposition','job position','applied for','appliedfor','applied position','appliedposition'],
+  client:   ['client','client name','clientname','company','company name','companyname','organization','organisation','hiring client','hiringclient'],
+  currentCompany: ['current company','currentcompany','present company','presentcompany','employer','current employer','currentemployer','working at','workingat','current organization','currentorganization'],
+  industry:  ['industry','sector','domain','industry type','industrytype'],
+  skills:    ['skills','skill set','skillset','technologies','techstack','tech stack','technical skills','technicalskills','key skills','keyskills'],
+  education: ['education','qualification','degree','highest qualification','highestqualification','academic qualification','academicqualification','educational qualification','educationalqualification'],
+  totalExperience:    ['total experience','totalexperience','experience','exp','years of experience','yearsofexperience','total exp','totalexp','total years','totalyears','yoe'],
+  relevantExperience: ['relevant experience','relevantexperience','relevant exp','relevantexp','related experience','relatedexperience','rel exp','relexp'],
+  ctc:  ['ctc','current ctc','currentctc','current salary','currentsalary','current package','currentpackage','current cost','currentcost'],
+  ectc: ['ectc','expected ctc','expectedctc','expected salary','expectedsalary','expected package','expectedpackage','ctc expected','exp ctc','expctc','salary','expected cost','expectedcost'],
+  currentTakeHome:  ['current take home','currenttakehome','take home','takehome','take home salary','takehomesalary','in hand','inhand','net salary','netsalary','in hands','inhands'],
+  expectedTakeHome: ['expected take home','expectedtakehome','expected in hand','expectedinhand','expected net salary','expectednetsalary'],
+  noticePeriod:        ['notice period','noticeperiod','notice','availability','np','notice time','noticetime','notice duration','noticeduration'],
+  servingNoticePeriod: ['serving notice','servingnotice','serving notice period','servingnoticeperiod','currently serving','currentlyserving','on notice','onnotice'],
+  noticePeriodDays:    ['notice period days','noticeperioddays','days remaining','daysremaining','notice days','noticedays'],
+  lwd: ['lwd','last working day','lastworkingday','last day','lastday','last date','lastdate'],
+  offersInHand:    ['offers in hand','offersinhand','offer in hand','offerinhand','has offer','hasoffer','competing offer','competingoffer'],
+  offerPackage:    ['offer package','offerpackage','offer amount','offeramount','competing package','competingpackage','offer ctc','offerctc'],
+  reasonForChange: ['reason for change','reasonforchange','reason for leaving','reasonforleaving','reason','motivation'],
+  source:  ['source','candidate source','candidatesource','reference','referral','source of candidate','sourceofcandidate','sourced from','sourcedfrom'],
+  status:  ['status','candidate status','candidatestatus','current status','currentstatus','stage','pipeline stage','pipelinestage'],
+  rating:  ['rating','candidate rating','candidaterating','score','stars'],
+  dateAdded: ['date added','dateadded','submission date','submissiondate','added on','addedon','entry date','entrydate'],
+  notes:   ['notes','note','internal notes','internalnotes','comment','comments'],
+  remarks: ['remarks','remark','feedback','observation','interviewer remarks','hr remarks','additional comments','additionalcomments'],
+  resumeUrl: ['resume url','resumeurl','resume link','resumelink','cv link','cvlink','cv url','cvurl','portfolio','resume','profile link','profilelink'],
+};
+const _VALID_IMPORT_STATUSES = ['Submitted','Shared Profiles','Yet to attend','Turnups','No Show','Selected','Joined','Rejected','Pipeline','Hold','Backout'];
+const _norm = (s) => (s||'').toLowerCase().replace(/[\s_\-.]+/g,'');
+const _findCol = (headers, field) => {
+  const aliases = (_FIELD_ALIASES[field]||[]).map(_norm);
+  for (const h of headers) if (aliases.includes(_norm(h))) return h;
+  for (const h of headers) { const nh=_norm(h); for (const a of aliases) if (a.length>=4&&nh.startsWith(a)) return h; }
+  for (const h of headers) { const nh=_norm(h); for (const a of aliases) if (a.length>=5&&nh.includes(a)) return h; }
+  return null;
+};
+const _getVal = (row, key) => {
+  if (!key || !(key in row)) return '';
+  const v = row[key];
+  if (v===null||v===undefined) return '';
+  if (typeof v==='number') { const s=v.toString(); if (/e[+-]/i.test(s)) return Math.round(v).toString(); return s; }
+  if (v instanceof Date) return v.toISOString().split('T')[0];
+  return String(v).trim();
+};
+const _splitName = (full) => { const p=(full||'').trim().split(/\s+/); if(!p[0]) return {firstName:'',lastName:''}; if(p.length===1) return {firstName:p[0],lastName:p[0]}; return {firstName:p[0],lastName:p.slice(1).join(' ')}; };
+const _san = (s) => String(s||'').replace(/<[^>]*>/g,'').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'').trim();
+const _ALLOWED_EXTS = new Set(['.xlsx','.xls','.csv']);
+const _ALLOWED_TYPES = new Set(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel','text/csv','text/plain','application/csv']);
+const isValidFileType = (file) => { const ext=file.name.substring(file.name.lastIndexOf('.')).toLowerCase(); return _ALLOWED_TYPES.has(file.type)||_ALLOWED_EXTS.has(ext); };
+const parseExcelToCandidates = (file, onProgress) => new Promise((resolve, reject) => {
+  if (!isValidFileType(file)) return reject(new Error('Invalid file type. Only .xlsx, .xls, and .csv are supported.'));
+  const reader = new FileReader();
+  reader.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded/e.total)*40)); };
+  reader.onload = (e) => {
+    try {
+      if (onProgress) onProgress(50);
+      const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array',cellDates:true,raw:false});
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:'',raw:false});
+      if (!rows||rows.length===0) return reject(new Error('File is empty or has no data rows.'));
+      const headers = Object.keys(rows[0]||{});
+      if (!headers.length) return reject(new Error('No recognisable column headers found.'));
+      if (onProgress) onProgress(60);
+      const cols = {}; Object.keys(_FIELD_ALIASES).forEach(f => { cols[f]=_findCol(headers,f); });
+      const hasFirst=!!cols.firstName, hasLast=!!cols.lastName, hasFullOnly=!hasFirst&&!hasLast;
+      const fullNameKey = hasFullOnly ? headers.find(h=>['name','fullname','candidatename'].includes(_norm(h))) : null;
+      if (onProgress) onProgress(70);
+      const validRows=[], invalidRows=[], allRows=[];
+      rows.forEach((row, idx) => {
+        const rowErrors=[];
+        let firstName='', lastName='';
+        if (hasFirst||hasLast) {
+          firstName=_san(_getVal(row,cols.firstName)); lastName=_san(_getVal(row,cols.lastName));
+          if (firstName&&!lastName&&firstName.includes(' ')) { const s=_splitName(firstName); firstName=s.firstName; lastName=s.lastName; }
+        } else if (hasFullOnly&&fullNameKey) { const s=_splitName(_san(_getVal(row,fullNameKey))); firstName=s.firstName; lastName=s.lastName; }
+        if (!firstName||firstName.length<2) rowErrors.push('First Name is required (min 2 chars)');
+        const email=_san(_getVal(row,cols.email)).toLowerCase();
+        if (!email) rowErrors.push('Email is required');
+        else if (!/^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(email)) rowErrors.push('Invalid Email format');
+        const contact=_getVal(row,cols.contact).replace(/\D/g,'').slice(-10);
+        if (!contact) rowErrors.push('Phone is required');
+        else if (contact.length!==10) rowErrors.push(`Phone must be 10 digits (got: ${contact})`);
+        const position=_san(_getVal(row,cols.position));
+        if (!position) rowErrors.push('Position (Role) is required');
+        const client=_san(_getVal(row,cols.client));
+        const skillsRaw=_san(_getVal(row,cols.skills));
+        const skills=skillsRaw ? skillsRaw.split(/[,;|]+/).map(s=>s.trim()).filter(Boolean) : [];
+        let statusArr=[];
+        const statusRaw=_san(_getVal(row,cols.status));
+        if (statusRaw) statusArr=statusRaw.split(/[,;|]+/).map(s=>s.trim()).filter(s=>_VALID_IMPORT_STATUSES.includes(s));
+        if (!statusArr.length) statusArr=['Submitted'];
+        const servingRaw=_san(_getVal(row,cols.servingNoticePeriod)).toLowerCase();
+        const offersRaw=_san(_getVal(row,cols.offersInHand)).toLowerCase();
+        const isTruthy=(v)=>['yes','true','1','y'].includes(v);
+        const ratingRaw=_san(_getVal(row,cols.rating));
+        const parsed = {
+          _rowNum: idx+1, firstName, lastName, email, contact, position, client, skills, status: statusArr,
+          alternateNumber: _san(_getVal(row,cols.alternateNumber)).replace(/\D/g,'').slice(-10)||'',
+          dateOfBirth: _san(_getVal(row,cols.dateOfBirth))||'', gender: _san(_getVal(row,cols.gender))||'',
+          linkedin: _san(_getVal(row,cols.linkedin))||'',
+          currentLocation: _san(_getVal(row,cols.currentLocation))||'', preferredLocation: _san(_getVal(row,cols.preferredLocation))||'',
+          currentCompany: _san(_getVal(row,cols.currentCompany))||'', industry: _san(_getVal(row,cols.industry))||'',
+          education: _san(_getVal(row,cols.education))||'',
+          totalExperience: _san(_getVal(row,cols.totalExperience))||'', relevantExperience: _san(_getVal(row,cols.relevantExperience))||'',
+          ctc: _san(_getVal(row,cols.ctc))||'', ectc: _san(_getVal(row,cols.ectc))||'',
+          currentTakeHome: _san(_getVal(row,cols.currentTakeHome))||'', expectedTakeHome: _san(_getVal(row,cols.expectedTakeHome))||'',
+          noticePeriod: _san(_getVal(row,cols.noticePeriod))||'',
+          servingNoticePeriod: isTruthy(servingRaw)?'true':'false',
+          noticePeriodDays: _san(_getVal(row,cols.noticePeriodDays))||'', lwd: _san(_getVal(row,cols.lwd))||'',
+          reasonForChange: _san(_getVal(row,cols.reasonForChange))||'',
+          offersInHand: isTruthy(offersRaw)?'true':'false', offerPackage: _san(_getVal(row,cols.offerPackage))||'',
+          source: _san(_getVal(row,cols.source))||'Excel Import',
+          rating: ratingRaw ? Math.min(5,Math.max(0,parseInt(ratingRaw)||0)) : 0,
+          dateAdded: _san(_getVal(row,cols.dateAdded))||new Date().toISOString().split('T')[0],
+          notes: _san(_getVal(row,cols.notes))||'', remarks: _san(_getVal(row,cols.remarks))||'',
+          resumeUrl: _san(_getVal(row,cols.resumeUrl))||'',
+        };
+        const entry={...parsed,valid:rowErrors.length===0,errors:rowErrors};
+        allRows.push(entry);
+        if (rowErrors.length===0) validRows.push(entry); else invalidRows.push(entry);
+      });
+      if (onProgress) onProgress(100);
+      resolve({validRows,invalidRows,allRows,totalCount:rows.length});
+    } catch(err) { reject(new Error(`Failed to parse file: ${err.message}`)); }
+  };
+  reader.onerror = () => reject(new Error('Failed to read file.'));
+  reader.readAsArrayBuffer(file);
+});
+const downloadCandidateTemplate = () => {
+  const headers = ['First Name *','Last Name *','Email *','Phone *','Position *','Client *','Skills *','Alternate Number','Date of Birth','Gender','LinkedIn URL','Current Location','Preferred Location','Current Company','Industry','Education','Total Experience','Relevant Experience','Current CTC','Expected CTC','Current Take Home','Expected Take Home','Notice Period','Serving Notice','LWD','Reason For Change','Offers In Hand','Offer Package','Source','Status','Rating','Date Added','Remarks','Notes'];
+  const today = new Date().toISOString().split('T')[0];
+  const sampleRows = [
+    {'First Name *':'Rahul','Last Name *':'Sharma','Email *':'rahul.sharma@example.com','Phone *':'9876543210','Position *':'Frontend Developer','Client *':'Acme Corp','Skills *':'React, TypeScript, Node.js','Alternate Number':'8765432109','Date of Birth':'1995-06-15','Gender':'Male','LinkedIn URL':'https://linkedin.com/in/rahul-sharma','Current Location':'Bangalore','Preferred Location':'Hyderabad','Current Company':'Infosys','Industry':'IT Services','Education':'B.Tech Computer Science - VIT 2017','Total Experience':'5 yrs 6 months','Relevant Experience':'4 yrs 0 months','Current CTC':'8 LPA','Expected CTC':'12 LPA','Current Take Home':'55000','Expected Take Home':'80000','Notice Period':'30 Days','Serving Notice':'No','LWD':'','Reason For Change':'Better growth','Offers In Hand':'No','Offer Package':'','Source':'LinkedIn','Status':'Submitted','Rating':'4','Date Added':today,'Remarks':'Strong React skills','Notes':'Follow up next week'},
+    {'First Name *':'Priya','Last Name *':'Nair','Email *':'priya.nair@example.com','Phone *':'9123456780','Position *':'Java Developer','Client *':'TechStart Inc','Skills *':'Java, Spring Boot, Microservices','Alternate Number':'','Date of Birth':'1993-03-22','Gender':'Female','LinkedIn URL':'https://linkedin.com/in/priya-nair','Current Location':'Chennai','Preferred Location':'Chennai','Current Company':'Wipro','Industry':'IT & Software','Education':'M.Tech - Anna University 2015','Total Experience':'7 yrs 2 months','Relevant Experience':'5 yrs 0 months','Current CTC':'12 LPA','Expected CTC':'17 LPA','Current Take Home':'80000','Expected Take Home':'110000','Notice Period':'60 Days','Serving Notice':'Yes','LWD':'2026-07-15','Reason For Change':'Seeking senior role','Offers In Hand':'Yes','Offer Package':'16 LPA','Source':'Portal','Status':'Submitted','Rating':'5','Date Added':today,'Remarks':'Excellent candidate','Notes':'Prefers hybrid work'},
+  ];
+  const ws = XLSX.utils.json_to_sheet(sampleRows, {header: headers});
+  ws['!cols'] = headers.map(h=>({wch:Math.max(h.length+4,20)}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Candidates');
+  const infoRows = [
+    {Column:'First Name *',Required:'YES',Notes:'Min 2 chars. Or use "Full Name" column — auto-split.'},
+    {Column:'Last Name *',Required:'YES',Notes:'Not needed if "Full Name" is used.'},
+    {Column:'Email *',Required:'YES',Notes:'Valid email. Duplicates are skipped.'},
+    {Column:'Phone *',Required:'YES',Notes:'Exactly 10 digits.'},
+    {Column:'Position *',Required:'YES',Notes:'Job title / role applied for.'},
+    {Column:'Client *',Required:'YES',Notes:'Client / company name.'},
+    {Column:'Skills *',Required:'YES',Notes:'Comma-separated skills.'},
+    {Column:'Status',Required:'No',Notes:'Defaults to Submitted. Options: Submitted, Pipeline, Shared Profiles, Yet to attend, Turnups, Selected, Hold, Rejected, No Show, Backout, Joined.'},
+    {Column:'Serving Notice',Required:'No',Notes:'Yes / No.'},
+    {Column:'Offers In Hand',Required:'No',Notes:'Yes / No.'},
+    {Column:'Rating',Required:'No',Notes:'1 to 5.'},
+    {Column:'Date Added',Required:'No',Notes:'Defaults to today. YYYY-MM-DD.'},
+  ];
+  const wsInfo = XLSX.utils.json_to_sheet(infoRows, {header:['Column','Required','Notes']});
+  wsInfo['!cols'] = [{wch:28},{wch:10},{wch:70}];
+  XLSX.utils.book_append_sheet(wb, wsInfo, 'Field Reference');
+  XLSX.writeFile(wb, 'candidate_import_template.xlsx');
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 
 // ── ENV Config ────────────────────────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
@@ -47,23 +219,26 @@ const inputCls = (err) =>
 
 // ── Optional Fields that can be hidden ────────────────────────────────────────
 const OPTIONAL_STANDARD_FIELDS = [
-  { id: 'alternateNumber', label: 'Alternate Number' },
-  { id: 'currentLocation', label: 'Current Location' },
-  { id: 'preferredLocation', label: 'Preferred Location' },
-  { id: 'dateOfBirth', label: 'Date of Birth' },
-  { id: 'currentCompany', label: 'Current Company' },
-  { id: 'reasonForChange', label: 'Reason for Change' },
-  { id: 'totalExperience', label: 'Total Experience' },
+  { id: 'alternateNumber',    label: 'Alternate Number' },
+  { id: 'currentLocation',    label: 'Current Location' },
+  { id: 'preferredLocation',  label: 'Preferred Location' },
+  { id: 'dateOfBirth',        label: 'Date of Birth' },
+  { id: 'gender',             label: 'Gender' },
+  { id: 'linkedin',           label: 'LinkedIn' },
+  { id: 'currentCompany',     label: 'Current Company' },
+  { id: 'industry',           label: 'Industry' },
+  { id: 'education',          label: 'Educational Qualification' },
+  { id: 'reasonForChange',    label: 'Reason for Change' },
+  { id: 'totalExperience',    label: 'Total Experience' },
   { id: 'relevantExperience', label: 'Relevant Experience' },
-  { id: 'skills', label: 'Skills' },
-  { id: 'ctc', label: 'Current CTC' },
-  { id: 'currentTakeHome', label: 'Current Take Home' },
-  { id: 'ectc', label: 'Expected CTC' },
-  { id: 'expectedTakeHome', label: 'Expected Take Home' },
-  { id: 'noticePeriod', label: 'Notice Period' },
-  { id: 'servingNoticePeriod', label: 'Serving Notice Period?' },
-  { id: 'lwd', label: 'Last Working Day (LWD)' },
-  { id: 'offersInHand', label: 'Offers In Hand' },
+  { id: 'ctc',                label: 'Current CTC' },
+  { id: 'currentTakeHome',    label: 'Current Take Home' },
+  { id: 'ectc',               label: 'Expected CTC' },
+  { id: 'expectedTakeHome',   label: 'Expected Take Home' },
+  { id: 'noticePeriod',       label: 'Notice Period' },
+  { id: 'servingNoticePeriod',label: 'Serving Notice Period?' },
+  { id: 'lwd',                label: 'Last Working Day (LWD)' },
+  { id: 'offersInHand',       label: 'Offers In Hand' },
 ];
 
 // ── StatCard ──────────────────────────────────────────────────────────────────
@@ -126,20 +301,17 @@ const getSafeDate = (d) => {
 };
 
 const ApplicationStatusBar = ({ currentStatus }) => {
-  const statusArr = (() => {
-    if (Array.isArray(currentStatus)) return [...new Set(currentStatus)];
-    if (typeof currentStatus === 'string') {
-      const parsed = currentStatus.split(',').map(s => s.trim()).filter(Boolean);
-      return [...new Set(parsed)].sort((a, b) => STATUS_FLOW_ORDER.indexOf(a) - STATUS_FLOW_ORDER.indexOf(b));
-    }
-    return [currentStatus || 'Submitted'];
+  const statusStr = (() => {
+    if (Array.isArray(currentStatus)) return currentStatus[currentStatus.length - 1] || 'Submitted';
+    return currentStatus || 'Submitted';
   })();
-  const terminalStatuses = ['Selected', 'Joined', 'Rejected', 'Backout', 'No Show'];
 
-  // Also sort if it's already an array
-  const sortedStatusArr = [...statusArr].sort((a, b) => STATUS_FLOW_ORDER.indexOf(a) - STATUS_FLOW_ORDER.indexOf(b));
+  const baseStages = ['Pipeline', 'Submitted', 'Shared Profiles', 'Yet to attend', 'Turnups'];
+  const terminalStatuses = ['Selected', 'Joined', 'Rejected', 'Hold', 'Backout', 'No Show'];
 
-  const isEnded = sortedStatusArr.some(s => terminalStatuses.includes(s));
+  const isTerminal = terminalStatuses.includes(statusStr);
+  const steps = isTerminal ? [...baseStages, statusStr] : baseStages;
+  const currentIndex = steps.indexOf(statusStr);
 
   const getStatusColor = (s) => {
     if (['Joined', 'Selected'].includes(s)) return 'bg-emerald-600';
@@ -151,20 +323,6 @@ const ApplicationStatusBar = ({ currentStatus }) => {
     return 'bg-blue-600'; // Default Submitted
   };
 
-  const steps = sortedStatusArr.map(s => ({
-    label: s,
-    color: getStatusColor(s)
-  }));
-
-  if (!isEnded) {
-    steps.push({
-      label: 'Awaiting Action',
-      color: 'bg-slate-300'
-    });
-  }
-
-  const currentIndex = steps.length - 1;
-
   return (
     <div className="mt-8 mb-6 w-full max-w-4xl mx-auto">
       <div className="text-[10px] font-bold text-slate-400 mb-8 uppercase tracking-[0.2em] text-center">Application Timeline</div>
@@ -172,29 +330,39 @@ const ApplicationStatusBar = ({ currentStatus }) => {
         {/* Connection Line Container */}
         <div className="absolute top-[11px] left-0 w-full h-[2px] bg-slate-100 z-0" />
 
+        {/* Progress Fill Line */}
+        <div 
+          className="absolute top-[11px] left-0 h-[2px] bg-blue-600 transition-all duration-300 z-0"
+          style={{ width: `${currentIndex >= 0 ? (currentIndex / (steps.length - 1)) * 100 : 0}%` }}
+        />
+
         {steps.map((step, idx) => {
-          const isCompleted = idx < currentIndex || (isEnded && idx === currentIndex);
-          const isNext = !isEnded && idx === currentIndex;
+          const isActive = idx === currentIndex;
+          const isCompleted = idx <= currentIndex;
+          const statusColor = getStatusColor(step);
+
+          let circleBg = 'bg-white border-slate-200';
+          if (isCompleted && !isActive) {
+            circleBg = `${statusColor} border-transparent scale-110`;
+          } else if (isActive) {
+            circleBg = 'bg-white border-slate-400';
+          }
 
           return (
-            <div key={idx} className="relative z-10 flex flex-col items-center flex-1 group/step">
-              {/* Colored Connection Line (leading to this step) */}
-              {idx > 0 && (
-                <div className={`absolute top-[11px] right-1/2 w-full h-[2px] -z-10 transition-colors duration-500 ${idx <= currentIndex ? steps[idx - 1].color : 'bg-slate-100'
-                  }`} />
-              )}
-
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 shadow-sm transition-all duration-500 ${isCompleted ? `${step.color} border-transparent scale-110` : isNext ? 'bg-white border-slate-400' : 'bg-white border-slate-200'
-                }`}>
-                {isNext && (
-                  <div className={`w-2.5 h-2.5 rounded-full ${steps[currentIndex - 1]?.color || 'bg-blue-500'} animate-pulse`} />
+            <div key={step} className="relative z-10 flex flex-col items-center flex-1 group/step">
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 shadow-sm transition-all duration-500 ${circleBg}`}>
+                {isCompleted && !isActive && (
+                  <Check className="h-3.5 w-3.5 text-white" />
+                )}
+                {isActive && (
+                  <div className={`w-2.5 h-2.5 rounded-full ${statusColor} animate-pulse`} />
                 )}
               </div>
 
-              <div className={`mt-3 text-center px-1 transition-all duration-500 ${idx <= currentIndex ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
+              <div className={`mt-3 text-center px-1 transition-all duration-500 ${isCompleted ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
                 }`} style={{ fontSize: '9px', lineHeight: '1.2' }}>
                 <div className="max-w-[80px] break-words whitespace-normal mx-auto uppercase tracking-tighter">
-                  {step.label}
+                  {step}
                 </div>
               </div>
             </div>
@@ -204,6 +372,82 @@ const ApplicationStatusBar = ({ currentStatus }) => {
     </div>
   );
 };
+
+const SubmissionPipeline = ({ status, onStepClick }) => {
+  const baseStages = ['Pipeline', 'Submitted', 'Shared Profiles', 'Yet to attend', 'Turnups'];
+  const terminalStages = ['Selected', 'Joined', 'Rejected', 'Hold', 'Backout', 'No Show'];
+  
+  const isTerminal = terminalStages.includes(status);
+  const steps = isTerminal ? [...baseStages, status] : baseStages;
+  const currentIndex = steps.indexOf(status);
+
+  const getStepColor = (step, idx) => {
+    if (idx < currentIndex) {
+      return 'bg-blue-600 text-white border-blue-600';
+    } else if (idx === currentIndex) {
+      if (['Selected', 'Joined'].includes(step)) return 'bg-emerald-600 text-white border-emerald-600 ring-4 ring-emerald-100';
+      if (['Rejected', 'Backout', 'No Show'].includes(step)) return 'bg-red-600 text-white border-red-600 ring-4 ring-red-100';
+      if (['Hold'].includes(step)) return 'bg-orange-500 text-white border-orange-500 ring-4 ring-orange-100';
+      return 'bg-blue-600 text-white border-blue-600 ring-4 ring-blue-100';
+    } else {
+      return 'bg-white text-slate-400 border-slate-200 hover:border-slate-400';
+    }
+  };
+
+  return (
+    <div className="w-full py-4 relative">
+      <div className="relative flex items-center justify-between">
+        {/* Background Line */}
+        <div className="absolute left-0 right-0 top-[14px] -translate-y-1/2 h-[2px] bg-slate-200 z-0" />
+        
+        {/* Progress Fill Line */}
+        <div 
+          className="absolute left-0 top-[14px] -translate-y-1/2 h-[2px] bg-blue-600 transition-all duration-300 z-0"
+          style={{ width: `${currentIndex >= 0 ? (currentIndex / (steps.length - 1)) * 100 : 0}%` }}
+        />
+
+        {steps.map((step, idx) => {
+          const isActive = idx === currentIndex;
+          const isCompleted = idx <= currentIndex;
+          const stepStyles = getStepColor(step, idx);
+
+          return (
+            <div key={step} className="flex flex-col items-center flex-1 relative z-10">
+              <button
+                type="button"
+                onClick={() => onStepClick(step)}
+                className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-semibold transition-all duration-200 bg-white ${stepStyles}`}
+                title={`Change status to ${step}`}
+              >
+                {isCompleted && !isActive ? (
+                  <Check className="h-3.5 w-3.5 text-white" />
+                ) : (
+                  idx + 1
+                )}
+              </button>
+              <span className={`mt-2 text-[9px] font-semibold text-center max-w-[85px] leading-tight transition-colors duration-200 select-none uppercase tracking-tighter ${
+                isActive ? 'text-slate-900 font-bold' : isCompleted ? 'text-slate-700 font-medium' : 'text-slate-400'
+              }`}>
+                {step}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const getStatusDotColor = (s) => {
+  if (['Joined', 'Selected'].includes(s)) return 'bg-emerald-500';
+  if (['Rejected', 'Backout', 'No Show'].includes(s)) return 'bg-red-500';
+  if (['Turnups'].includes(s)) return 'bg-purple-500';
+  if (['Shared Profiles'].includes(s)) return 'bg-blue-500';
+  if (['Pipeline'].includes(s)) return 'bg-amber-500';
+  if (['Hold'].includes(s)) return 'bg-orange-500';
+  return 'bg-slate-400';
+};
+
 const getRecruiterName = (r) => {
   if (!r) return 'Unassigned';
   if (r.firstName && r.lastName) return r.firstName + " " + r.lastName;
@@ -224,6 +468,7 @@ const STATUS_FLOW_ORDER = [
 
 const ALL_STATUSES = [...STATUS_FLOW_ORDER];
 const SOURCES = ['LinkedIn', 'Naukri', 'Indeed', 'Portal', 'Referral', 'Other'];
+const formatDate = (dateString) => dateString ? new Date(dateString).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A';
 
 // ── CustomFieldInput — renders the right input for a custom field type ────────
 const CustomFieldInput = ({ cf, value, onChange }) => {
@@ -261,9 +506,19 @@ export default function AdminCandidates() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isParsingResume, setIsParsingResume] = useState(false);
   const [resumeSuccess, setResumeSuccess] = useState({ show: false, fileName: '', fieldsCount: 0 });
+  const [viewingCandidate, setViewingCandidate] = useState(null);
+  const [selectedDeliverClientId, setSelectedDeliverClientId] = useState('');
+
+  const filteredJobs = useMemo(() => {
+    if (!selectedDeliverClientId) return [];
+    const client = clients.find(c => c._id === selectedDeliverClientId);
+    if (!client) return [];
+    return jobs.filter(j => j.clientName === client.companyName);
+  }, [selectedDeliverClientId, clients, jobs]);
 
   // ── Filter / Sort / Pagination State ─────────────────────────────────────
   const [searchTerm, setSearchTerm] = useState('');
+  const [roleSearchTerm, setRoleSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [recruiterFilter, setRecruiterFilter] = useState('all');
   const [clientFilter, setClientFilter] = useState('all');
@@ -301,15 +556,28 @@ export default function AdminCandidates() {
   const [bulkRecruiterId, setBulkRecruiterId] = useState('');
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
   const [expandedRowId, setExpandedRowId] = useState(null);
+  const [activeClientPopoverId, setActiveClientPopoverId] = useState(null);
+  const [activeStatusPopoverId, setActiveStatusPopoverId] = useState(null);
+
+  // ── Bulk Import State ────────────────────────────────────────────────────
+  const importFileInputRef = useRef(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importParsedData, setImportParsedData] = useState(null);
+  const [importParseProgress, setImportParseProgress] = useState(0);
+  const [isParsing, setIsParsing] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [importDragOver, setImportDragOver] = useState(false);
+  const [importFileName, setImportFileName] = useState('');
 
   const todayStr = new Date().toISOString().split('T')[0];
   const initialFormData = {
     firstName: '', lastName: '', contact: '', alternateNumber: '', email: '',
-    dateOfBirth: '', dateAdded: todayStr,
+    dateOfBirth: '', dateAdded: todayStr, gender: '', linkedin: '',
     currentLocation: '', preferredLocation: '', position: '', positionOther: '', client: '', clientCandidateId: '',
-    currentCompany: '', totalExperienceYears: '0', totalExperienceMonths: '0',
+    currentCompany: '', industry: '', totalExperienceYears: '0', totalExperienceMonths: '0',
     relevantExperienceYears: '0', relevantExperienceMonths: '0',
-    totalExperience: '', relevantExperience: '',
+    totalExperience: '', relevantExperience: '', education: '',
     ctc: '', currentTakeHome: '', ectc: '', expectedTakeHome: '',
     noticePeriod: '', servingNoticePeriod: 'false', lwd: '',
     reasonForChange: '', offersInHand: 'false', offerPackage: '', source: 'Portal',
@@ -319,7 +587,7 @@ export default function AdminCandidates() {
   };
   const [formData, setFormData] = useState(initialFormData);
 
-  useEffect(() => { setCurrentPage(1); }, [searchTerm, statusFilter, recruiterFilter, clientFilter, activeStatFilter]);
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, roleSearchTerm, statusFilter, recruiterFilter, clientFilter, activeStatFilter]);
 
   // ── Data Fetching ─────────────────────────────────────────────────────────
   const fetchData = async () => {
@@ -352,6 +620,15 @@ export default function AdminCandidates() {
     }
   };
   useEffect(() => { fetchData(); }, []);
+
+  useEffect(() => {
+    const handleOutsideClick = () => {
+      setActiveClientPopoverId(null);
+      setActiveStatusPopoverId(null);
+    };
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, []);
 
   // ── Form Handlers ─────────────────────────────────────────────────────────
   const handleInputChange = (field, value) => {
@@ -487,9 +764,9 @@ export default function AdminCandidates() {
     else if (!/^\d{10}$/.test(d.contact.replace(/\D/g, '').slice(-10))) e.contact = 'Enter a valid 10-digit phone number';
     if (!d.email?.trim()) e.email = 'Email is required';
     else if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(d.email.trim())) e.email = 'Enter a valid email address';
-    if (!d.position && !d.positionOther) e.position = 'Position is required';
-    if (d.position === 'Other' && !d.positionOther?.trim()) e.positionOther = 'Please enter the position name';
-    if (!d.client?.trim()) e.client = 'Client is required';
+    if (!d.position?.trim()) e.position = 'Position is required';
+    // client is no longer required as a flat field
+    if (!d.skills?.trim()) e.skills = 'At least one skill is required';
     if (!d.status || d.status.length === 0) e.status = 'At least one status is required';
     if (!d.dateAdded) { e.dateAdded = 'Date Added is required'; }
     else if (d.dateAdded > new Date().toLocaleDateString('en-CA')) e.dateAdded = 'Cannot be a future date';
@@ -550,17 +827,13 @@ export default function AdminCandidates() {
       const url = isEditMode ? `${API_URL}/candidates/${selectedCandidateId}` : `${API_URL}/candidates`;
       const method = isEditMode ? 'PUT' : 'POST';
 
-      const resolvedPosition = formData.position === 'Other' ? formData.positionOther.trim() : formData.position;
-
       const payload = {
         ...formData,
         name: `${formData.firstName} ${formData.lastName}`.trim(),
-        position: resolvedPosition,
         offersInHand: formData.offersInHand === 'true',
         servingNoticePeriod: formData.servingNoticePeriod === 'true',
         customFields: JSON.stringify(formData.customFields || {}),
       };
-      delete payload.positionOther;
 
       const fd = new FormData();
       // Append resume file if present
@@ -582,7 +855,12 @@ export default function AdminCandidates() {
       if (isEditMode) {
         setCandidates((prev) => prev.map((c) => c._id === selectedCandidateId ? { ...c, ...saved } : c));
       } else {
-        setCandidates((prev) => [saved, ...prev]);
+        if (selectedDeliverClientId) {
+          const jobIdSelect = document.getElementById('deliver-job-select');
+          await handleDeliverToClient(selectedDeliverClientId, jobIdSelect ? jobIdSelect.value : '', saved._id);
+        } else {
+          setCandidates((prev) => [saved, ...prev]);
+        }
       }
       toast({ title: 'Success', description: `Candidate ${isEditMode ? 'updated' : 'added'} successfully.` });
       setIsDialogOpen(false);
@@ -596,6 +874,7 @@ export default function AdminCandidates() {
       }
     } finally {
       setIsSubmitting(false);
+      setSelectedDeliverClientId('');
     }
   };
 
@@ -611,19 +890,108 @@ export default function AdminCandidates() {
     }
   };
 
+  const refreshViewingCandidate = async (candidateId) => {
+    try {
+      const headers = getAuthHeader();
+      const res = await fetch(`${API_URL}/candidates/${candidateId}`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setViewingCandidate(data);
+        setCandidates(prev => prev.map(c => c._id === candidateId ? { ...c, submissions: data.submissions } : c));
+      }
+    } catch (err) {
+      console.error("Error refreshing candidate details", err);
+    }
+  };
+
+  const handleDeliverToClient = async (clientId, jobId, specificCandidateId = null) => {
+    const cid = specificCandidateId || (viewingCandidate && viewingCandidate._id);
+    if (!clientId || !cid) return;
+    try {
+      const headers = getAuthHeader();
+      const res = await fetch(`${API_URL}/submissions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          candidateId: cid,
+          clientId,
+          jobId: jobId || undefined
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (!specificCandidateId) {
+          toast({ title: 'Success', description: 'Candidate delivered to client successfully.' });
+          await refreshViewingCandidate(cid);
+        }
+        fetchData();
+      } else {
+        toast({ title: 'Error', description: data.message || 'Failed to deliver candidate', variant: 'destructive' });
+      }
+    } catch (err) {
+      toast({ title: 'Error', description: 'Failed to deliver candidate', variant: 'destructive' });
+    }
+  };
+
+  const handleUpdateSubmission = async (submissionId, status, remarks) => {
+    try {
+      const headers = getAuthHeader();
+      const res = await fetch(`${API_URL}/submissions/${submissionId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ status, remarks })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ title: 'Success', description: 'Submission updated successfully.' });
+        await refreshViewingCandidate(viewingCandidate._id);
+        fetchData();
+      } else {
+        toast({ title: 'Error', description: data.message || 'Failed to update submission', variant: 'destructive' });
+      }
+    } catch (err) {
+      toast({ title: 'Error', description: 'Failed to update submission', variant: 'destructive' });
+    }
+  };
+
+  const handleDeleteSubmission = async (submissionId) => {
+    if (!window.confirm('Are you sure you want to retract/delete this delivery?')) return;
+    try {
+      const headers = getAuthHeader();
+      const res = await fetch(`${API_URL}/submissions/${submissionId}`, {
+        method: 'DELETE',
+        headers
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ title: 'Success', description: 'Submission deleted successfully.' });
+        await refreshViewingCandidate(viewingCandidate._id);
+        fetchData();
+      } else {
+        toast({ title: 'Error', description: data.message || 'Failed to delete submission', variant: 'destructive' });
+      }
+    } catch (err) {
+      toast({ title: 'Error', description: 'Failed to delete submission', variant: 'destructive' });
+    }
+  };
+
   // ── Open Dialogs ──────────────────────────────────────────────────────────
   const openAddDialog = () => {
     setIsEditMode(false);
     setSelectedCandidateId(null);
+    setSelectedDeliverClientId('');
+    setViewingCandidate(null);
     setFormData(initialFormData);
     setErrors({});
     setResumeSuccess({ show: false, fileName: '', fieldsCount: 0 });
     setIsDialogOpen(true);
   };
 
-  const openEditDialog = (c) => {
+  const openEditDialog = async (c) => {
     setIsEditMode(true);
     setSelectedCandidateId(c._id);
+    setSelectedDeliverClientId('');
+    setViewingCandidate(c);
     const jobTitles = jobs.map((j) => j.title || j.jobTitle || j.position || '').filter(Boolean);
     const savedPos = c.position || '';
     const isKnownJob = jobTitles.includes(savedPos);
@@ -635,6 +1003,8 @@ export default function AdminCandidates() {
       email: c.email || '',
       dateOfBirth: c.dateOfBirth ? getSafeDate(c.dateOfBirth) : '',
       dateAdded: c.dateAdded ? getSafeDate(c.dateAdded) : '',
+      gender: c.gender || '',
+      linkedin: c.linkedin || '',
       currentLocation: c.currentLocation || '',
       preferredLocation: c.preferredLocation || '',
       position: isKnownJob || !savedPos ? savedPos : 'Other',
@@ -642,12 +1012,14 @@ export default function AdminCandidates() {
       client: c.client || '',
       clientCandidateId: c.clientCandidateId || '',
       currentCompany: c.currentCompany || '',
+      industry: c.industry || '',
       totalExperience: c.totalExperience || '',
       totalExperienceYears: (c.totalExperience || '').split('yrs')[0]?.trim() || '0',
       totalExperienceMonths: (c.totalExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
       relevantExperience: c.relevantExperience || '',
       relevantExperienceYears: (c.relevantExperience || '').split('yrs')[0]?.trim() || '0',
       relevantExperienceMonths: (c.relevantExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
+      education: c.education || '',
       ctc: c.ctc || '',
       currentTakeHome: c.currentTakeHome || '',
       ectc: c.ectc || '',
@@ -671,6 +1043,16 @@ export default function AdminCandidates() {
     });
     setErrors({});
     setIsDialogOpen(true);
+
+    try {
+      const headers = getAuthHeader();
+      const res = await fetch(`${API_URL}/candidates/${c._id}`, { headers });
+      if (res.ok) {
+        setViewingCandidate(await res.json());
+      }
+    } catch (err) {
+      console.error("Error loading details for edit modal:", err);
+    }
   };
 
   // ── Sort ──────────────────────────────────────────────────────────────────
@@ -691,13 +1073,18 @@ export default function AdminCandidates() {
       const matchSearch = (c.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c.candidateId || '').toLowerCase().includes(searchTerm.toLowerCase());
+        
+      const roleMatch = !roleSearchTerm || 
+        (c.position && c.position.toLowerCase().includes(roleSearchTerm.toLowerCase())) ||
+        (Array.isArray(c.skills) && c.skills.some(skill => skill.toLowerCase().includes(roleSearchTerm.toLowerCase())));
+        
       const statusArr = Array.isArray(c.status) ? c.status : [c.status || ''];
       const matchStatus = statusFilter === 'all' || statusArr.includes(statusFilter);
       const recId = typeof c.recruiterId === 'object' ? c.recruiterId?._id : c.recruiterId;
       const matchRec = recruiterFilter === 'all' || recId === recruiterFilter;
       const matchClient = clientFilter === 'all' || c.client === clientFilter;
       const statMatch = activeStatFilter ? statusArr.includes(activeStatFilter) : true;
-      return matchSearch && matchStatus && matchRec && matchClient && statMatch;
+      return matchSearch && roleMatch && matchStatus && matchRec && matchClient && statMatch;
     });
     if (sortConfig) {
       result.sort((a, b) => {
@@ -709,7 +1096,7 @@ export default function AdminCandidates() {
       });
     }
     return result;
-  }, [candidates, searchTerm, statusFilter, recruiterFilter, clientFilter, activeStatFilter, sortConfig]);
+  }, [candidates, searchTerm, roleSearchTerm, statusFilter, recruiterFilter, clientFilter, activeStatFilter, sortConfig]);
 
   const stats = useMemo(() => {
     const count = (s) => candidates.filter((c) => (Array.isArray(c.status) ? c.status : [c.status || '']).includes(s)).length;
@@ -807,6 +1194,85 @@ export default function AdminCandidates() {
   };
 
   // ── Settings Modal Functions ──────────────────────────────────────────────
+  // ── Bulk Import Handlers ────────────────────────────────────────────────
+  const resetImportState = () => {
+    setImportParsedData(null);
+    setImportParseProgress(0);
+    setIsParsing(false);
+    setIsImporting(false);
+    setImportResult(null);
+    setImportDragOver(false);
+    setImportFileName('');
+    if (importFileInputRef.current) importFileInputRef.current.value = '';
+  };
+
+  const openImportModal = () => { resetImportState(); setIsImportModalOpen(true); };
+
+  const processImportFile = async (file) => {
+    if (!file) return;
+    if (!isValidFileType(file)) {
+      toast({ title: 'Invalid file type', description: 'Only .xlsx, .xls, and .csv are supported.', variant: 'destructive' });
+      return;
+    }
+    setImportFileName(file.name);
+    setIsParsing(true);
+    setImportParseProgress(0);
+    setImportParsedData(null);
+    setImportResult(null);
+    try {
+      const result = await parseExcelToCandidates(file, setImportParseProgress);
+      setImportParsedData(result);
+    } catch (err) {
+      toast({ title: 'Parse error', description: err.message, variant: 'destructive' });
+      setImportFileName('');
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const handleImportFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) processImportFile(file);
+  };
+
+  const handleImportDrop = (e) => {
+    e.preventDefault();
+    setImportDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) processImportFile(file);
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importParsedData || importParsedData.validRows.length === 0) return;
+    setIsImporting(true);
+    try {
+      const res = await fetch(`${API_URL}/candidates/bulk-import`, {
+        method: 'POST',
+        headers: getAuthHeader(),
+        body: JSON.stringify({ candidates: importParsedData.validRows, fileName: importFileName }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Import failed');
+      setImportResult(data);
+      toast({ title: 'Import Complete', description: `${data.importedSuccessfully} imported, ${data.failedRecords} failed, ${data.duplicatesSkipped} duplicates skipped.` });
+      if (data.importedSuccessfully > 0) fetchData();
+    } catch (err) {
+      toast({ title: 'Import Failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleDownloadErrorReport = () => {
+    if (!importResult?.errors?.length) return;
+    const rows = importResult.errors.map(e => ({ 'Row': e.row, 'Candidate Name': e.candidateName || '', 'Email': e.email || '', 'Reason': e.reason || '' }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 32 }, { wch: 50 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Import Errors');
+    XLSX.writeFile(wb, `import_errors_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   const handleOpenSettings = () => {
     setTempHiddenFields(tenantSettings.hiddenFields || []);
     setTempCustomFields(tenantSettings.customFields || []);
@@ -904,6 +1370,11 @@ export default function AdminCandidates() {
             <button onClick={handleExportExcel} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 hover:text-slate-900 transition shadow-sm">
               <Download className="h-4 w-4" /> Export Excel
             </button>
+            {/* Import Excel button */}
+            <input ref={importFileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportFileChange} />
+            <button onClick={openImportModal} className="flex items-center gap-2 px-4 py-2 bg-white border border-emerald-400 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 transition shadow-sm">
+              <FileSpreadsheet className="h-4 w-4" /> Import Excel
+            </button>
             <button onClick={openAddDialog} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition shadow-sm">
               <Plus className="h-4 w-4" /> Add Candidate
             </button>
@@ -927,10 +1398,16 @@ export default function AdminCandidates() {
         </div>
 
         {/* ── Filters ── */}
-        <div className="p-4 border border-slate-200 dark:border-slate-800 rounded-xl bg-white shadow-sm flex flex-col md:flex-row gap-4 justify-between">
-          <div className="relative w-full md:max-w-md">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search name, email, ID…" className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        <div className="p-4 border border-slate-200 dark:border-slate-800 rounded-xl bg-white shadow-sm flex flex-col xl:flex-row gap-4 justify-between">
+          <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto flex-1">
+            <div className="relative w-full sm:max-w-md">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search name, email, ID…" className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="relative w-full sm:max-w-sm">
+              <Briefcase className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <input value={roleSearchTerm} onChange={(e) => setRoleSearchTerm(e.target.value)} placeholder="Search job role or skills…" className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
           </div>
           <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full md:w-auto">
             <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
@@ -1000,8 +1477,7 @@ export default function AdminCandidates() {
                         className="group border-b border-slate-100 last:border-0"
                       >
                         <tr
-                          onClick={() => setExpandedRowId(expandedRowId === c._id ? null : c._id)}
-                          className={`transition-colors cursor-pointer ${isSelected ? 'bg-blue-50/50 hover:bg-blue-50' : 'hover:bg-slate-50'}`}
+                          className={`transition-colors ${isSelected ? 'bg-blue-50/50 hover:bg-blue-50' : 'hover:bg-slate-50'}`}
                         >
                           <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                             <input type="checkbox" checked={isSelected} onChange={(e) => handleSelectOne(e, c._id)} className="rounded border-slate-300 text-blue-600 h-4 w-4 cursor-pointer" />
@@ -1021,44 +1497,78 @@ export default function AdminCandidates() {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-[#283086] font-bold italic">{typeof c.recruiterId === 'object' ? getRecruiterName(c.recruiterId) : c.recruiterName || '-'}</td>
-                          <td className="px-4 py-3 text-slate-600 font-medium">{c.client || '-'}</td>
+                          <td className="px-4 py-3 relative">
+                            {c.submissions && c.submissions.length > 0 ? (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100 whitespace-nowrap overflow-hidden text-ellipsis max-w-[140px]" title={c.submissions[c.submissions.length - 1].clientName}>
+                                  <Building className="h-3 w-3 shrink-0" />
+                                  {c.submissions[c.submissions.length - 1].clientName}
+                                </span>
+                                {c.submissions.length > 1 && (
+                                  <span className="relative">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveClientPopoverId(activeClientPopoverId === c._id ? null : c._id);
+                                      }}
+                                      className="px-1.5 py-0.5 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-md border border-blue-200 transition whitespace-nowrap cursor-pointer select-none"
+                                    >
+                                      +{c.submissions.length - 1} more
+                                    </button>
+                                    {activeClientPopoverId === c._id && (
+                                      <div
+                                        className="absolute left-0 mt-1 z-[99] min-w-[200px] bg-white border border-slate-200 rounded-xl shadow-xl p-3 flex flex-col gap-1.5"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <div className="text-[9px] font-black text-slate-400 border-b pb-1 uppercase tracking-wider">
+                                          Associated Clients ({c.submissions.length})
+                                        </div>
+                                        <div className="flex flex-col gap-1 max-h-[160px] overflow-y-auto sleek-scrollbar">
+                                          {c.submissions.map((sub, idx) => (
+                                            <div
+                                              key={sub._id}
+                                              className={`text-xs font-semibold py-1 px-1.5 rounded flex items-center justify-between gap-3 ${
+                                                idx === c.submissions.length - 1
+                                                  ? 'bg-blue-50/50 text-blue-700'
+                                                  : 'text-slate-700 hover:bg-slate-50'
+                                              }`}
+                                            >
+                                              <span className="truncate max-w-[110px]" title={sub.clientName}>
+                                                {sub.clientName}
+                                              </span>
+                                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border scale-90 whitespace-nowrap ${getStatusBadgeColor(sub.status)}`}>
+                                                {sub.status}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 font-medium">—</span>
+                            )}
+                          </td>
                           <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{c.dateAdded ? new Date(c.dateAdded).toLocaleDateString('en-GB') : (c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-GB') : '-')}</td>
                           {!isHidden('totalExperience') && <td className="px-4 py-3 text-sm whitespace-nowrap">{c.totalExperience ? `${c.totalExperience} ` : '-'}</td>}
                           {!isHidden('ctc') && <td className="px-4 py-3 text-xs whitespace-nowrap"><div>{c.ctc ? `${c.ctc} LPA` : '-'}</div><div className="text-green-600">{c.ectc ? `${c.ectc} LPA` : '-'}</div></td>}
                           <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1 min-w-[120px]">
-                              <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold border whitespace-nowrap ${getStatusBadgeColor(statusArr[statusArr.length - 1])}`}>
-                                {statusArr[statusArr.length - 1] || 'Submitted'}
+                            {c.submissions && c.submissions.length > 0 ? (
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap overflow-hidden text-ellipsis ${getStatusBadgeColor(c.submissions[c.submissions.length - 1].status)}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${getStatusDotColor(c.submissions[c.submissions.length - 1].status)} shrink-0`} />
+                                {c.submissions[c.submissions.length - 1].status}
                               </span>
-                            </div>
+                            ) : (
+                              <span className="text-slate-400 font-medium">—</span>
+                            )}
                           </td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
-                            <div className="flex justify-end items-center gap-2">
-                              <Eye className="h-4 w-4 text-blue-600 cursor-pointer" onClick={(e) => { e.stopPropagation(); setViewCandidate(c); setIsViewDialogOpen(true); }} />
-                              <Edit className="h-4 w-4 text-slate-600 cursor-pointer" onClick={(e) => { e.stopPropagation(); openEditDialog(c); }} />
-                              <Trash2 className="h-4 w-4 text-red-500 cursor-pointer" onClick={(e) => { e.stopPropagation(); handleDelete(c._id); }} />
-                              <div className="ml-2 pl-2 border-l border-slate-200">
-                                <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${expandedRowId === c._id ? 'rotate-180' : ''}`} />
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                        <tr className={`bg-blue-50/20 border-blue-50/50 transition-all duration-300 ${expandedRowId === c._id ? 'border-t' : 'border-0'}`}>
-                          <td colSpan="100" className="p-0">
-                            <div className={`transition-all duration-500 ease-in-out overflow-hidden ${expandedRowId === c._id ? 'max-h-[500px] opacity-100 py-4 px-8' : 'max-h-0 opacity-0'}`}>
-                              <div className="flex flex-col gap-4 text-sm">
-                                <div className="flex items-start gap-2">
-                                  <span className="font-bold text-slate-700 min-w-[70px]">Skills:</span>
-                                  <span className="text-slate-600">
-                                    {!c.skills ? 'N/A' : Array.isArray(c.skills) ? c.skills.join(', ') : c.skills}
-                                  </span>
-                                </div>
-                                <div className="flex items-start gap-2">
-                                  <span className="font-bold text-slate-700 min-w-[70px]">Remarks:</span>
-                                  <span className="text-slate-600">{c.remarks || '-'}</span>
-                                </div>
-                                <ApplicationStatusBar currentStatus={c.status} />
-                              </div>
+                          <td className="px-4 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex justify-end items-center gap-1.5">
+                              <button className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-100 hover:border-blue-200 rounded-lg shadow-sm transition-all" title="View Candidate" onClick={(e) => { e.stopPropagation(); setViewCandidate(c); setIsViewDialogOpen(true); refreshViewingCandidate(c._id); }}><Eye className="h-4 w-4" /></button>
+                              <button className="p-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-100 hover:border-indigo-200 rounded-lg shadow-sm transition-all" title="Edit Candidate" onClick={(e) => { e.stopPropagation(); openEditDialog(c); }}><Edit className="h-4 w-4" /></button>
+                              <button className="p-2 bg-red-50 hover:bg-red-100 text-red-500 border border-red-100 hover:border-red-200 rounded-lg shadow-sm transition-all" title="Delete Candidate" onClick={(e) => { e.stopPropagation(); handleDelete(c._id); }}><Trash2 className="h-4 w-4" /></button>
                             </div>
                           </td>
                         </tr>
@@ -1234,6 +1744,25 @@ export default function AdminCandidates() {
                     <p className="text-xs text-slate-400 mt-1">Cannot be a future date. Defaults to today.</p>
                     {errors.dateAdded && <p className="text-xs text-red-500 mt-1">{errors.dateAdded}</p>}
                   </div>
+                  {!isHidden('gender') && (
+                    <div>
+                      <label className="block text-sm font-medium mb-1 text-slate-700">Gender</label>
+                      <select value={formData.gender} onChange={(e) => handleInputChange('gender', e.target.value)} className={inputCls(false)}>
+                        <option value="">Select Gender</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                        <option value="Not Specified">Not Specified</option>
+                      </select>
+                    </div>
+                  )}
+                  {!isHidden('linkedin') && (
+                    <div>
+                      <label className="block text-sm font-medium mb-1 text-slate-700">LinkedIn URL</label>
+                      <input type="text" value={formData.linkedin} onChange={(e) => handleInputChange('linkedin', e.target.value)} className={inputCls(errors.linkedin)} placeholder="https://linkedin.com/in/..." />
+                      {errors.linkedin && <p className="text-xs text-red-500 mt-1">{errors.linkedin}</p>}
+                    </div>
+                  )}
                 </div>
               </section>
 
@@ -1243,41 +1772,26 @@ export default function AdminCandidates() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium mb-1 text-slate-700">Role (Position) *</label>
-                    <select value={formData.position} onChange={(e) => { handleInputChange('position', e.target.value); if (e.target.value !== 'Other') handleInputChange('positionOther', ''); }} className={inputCls(errors.position)}>
-                      <option value="">Select Job Opening</option>
-                      {jobs.map((j) => {
-                        const title = j.title || j.jobTitle || j.position || '';
-                        return title ? <option key={j._id} value={title}>{title}{j.client ? ` — ${j.client}` : ''}</option> : null;
-                      })}
-                      <option value="Other">Other (type manually)</option>
-                    </select>
+                    <input
+                      type="text"
+                      value={formData.position}
+                      onChange={(e) => handleInputChange('position', e.target.value)}
+                      className={inputCls(errors.position)}
+                      placeholder="e.g. Frontend Developer"
+                    />
                     {errors.position && <p className="text-xs text-red-500 mt-1">{errors.position}</p>}
-                    {formData.position === 'Other' && (
-                      <div className="mt-2">
-                        <input type="text" value={formData.positionOther} onChange={(e) => handleInputChange('positionOther', e.target.value)} className={inputCls(errors.positionOther)} placeholder="Enter job opening name…" autoFocus />
-                        {errors.positionOther && <p className="text-xs text-red-500 mt-1">{errors.positionOther}</p>}
-                      </div>
-                    )}
                   </div>
-                  <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="block text-sm font-medium text-slate-700">Client / Target Company *</label>
-                      {formData.clientCandidateId && (
-                        <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100 uppercase tracking-wider">
-                          Company ID: {formData.clientCandidateId}
-                        </span>
-                      )}
-                    </div>
-                    <select value={formData.client} onChange={(e) => handleInputChange('client', e.target.value)} className={inputCls(errors.client)}>
-                      <option value="">Select Client</option>
-                      {clients.map((c) => <option key={c._id} value={c.companyName || c.name}>{c.companyName || c.name}</option>)}
-                    </select>
-                    {errors.client && <p className="text-xs text-red-500 mt-1">{errors.client}</p>}
-                  </div>
+
                   {!isHidden('currentCompany') && (
                     <div>
                       <label className="block text-sm font-medium mb-1 text-slate-700">Current Company</label>
                       <input type="text" value={formData.currentCompany} onChange={(e) => handleInputChange('currentCompany', e.target.value)} className={inputCls(false)} />
+                    </div>
+                  )}
+                  {!isHidden('industry') && (
+                    <div>
+                      <label className="block text-sm font-medium mb-1 text-slate-700">Industry</label>
+                      <input type="text" value={formData.industry} onChange={(e) => handleInputChange('industry', e.target.value)} className={inputCls(false)} />
                     </div>
                   )}
                   {!isHidden('reasonForChange') && (
@@ -1322,12 +1836,150 @@ export default function AdminCandidates() {
                       {errors.relevantExperience && <p className="text-xs text-red-500 mt-1">{errors.relevantExperience}</p>}
                     </div>
                   )}
-                  {!isHidden('skills') && (
+                  {!isHidden('education') && (
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Skills (Comma Separated)</label>
-                      <input type="text" value={formData.skills} onChange={(e) => handleInputChange('skills', e.target.value)} className={inputCls(false)} placeholder="React, Node, Python…" />
+                      <label className="block text-sm font-medium mb-1 text-slate-700">Educational Qualification</label>
+                      <input type="text" value={formData.education} onChange={(e) => handleInputChange('education', e.target.value)} className={inputCls(false)} placeholder="e.g. B.Tech, MBA..." />
                     </div>
                   )}
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Skills *</label>
+                    <div className={`flex flex-wrap gap-2 p-2 border rounded-lg ${errors.skills ? 'border-red-500' : 'border-slate-200'} bg-white focus-within:ring-2 focus-within:ring-blue-500`}>
+                      {formData.skills && formData.skills.split(',').map(s => s.trim()).filter(Boolean).map((skill, idx) => (
+                        <span key={idx} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                          {skill}
+                          <button type="button" onClick={() => {
+                            const newSkills = formData.skills.split(',').map(s => s.trim()).filter(Boolean).filter((_, i) => i !== idx);
+                            handleInputChange('skills', newSkills.join(', '));
+                          }} className="hover:text-blue-900 rounded-full p-0.5 hover:bg-blue-100 transition-colors">
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                      <input 
+                        type="text" 
+                        className="flex-1 outline-none min-w-[120px] text-sm bg-transparent"
+                        placeholder={formData.skills ? "Add more..." : "e.g. React, Node (Press Enter)"}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ',') {
+                            e.preventDefault();
+                            const val = e.target.value.trim().replace(/,/g, '');
+                            if (val) {
+                              const currentSkills = formData.skills ? formData.skills.split(',').map(s => s.trim()).filter(Boolean) : [];
+                              if (!currentSkills.includes(val)) {
+                                currentSkills.push(val);
+                                handleInputChange('skills', currentSkills.join(', '));
+                              }
+                            }
+                            e.target.value = '';
+                          } else if (e.key === 'Backspace' && !e.target.value && formData.skills) {
+                            const currentSkills = formData.skills.split(',').map(s => s.trim()).filter(Boolean);
+                            currentSkills.pop();
+                            handleInputChange('skills', currentSkills.join(', '));
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const val = e.target.value.trim().replace(/,/g, '');
+                          if (val) {
+                            const currentSkills = formData.skills ? formData.skills.split(',').map(s => s.trim()).filter(Boolean) : [];
+                            if (!currentSkills.includes(val)) {
+                              currentSkills.push(val);
+                              handleInputChange('skills', currentSkills.join(', '));
+                            }
+                            e.target.value = '';
+                          }
+                        }}
+                      />
+                    </div>
+                    {errors.skills && <p className="text-xs text-red-500 mt-1">{errors.skills}</p>}
+                  </div>
+
+                  <div className="md:col-span-2 mt-2 bg-blue-50/40 p-4 rounded-lg border border-blue-100">
+                    <h4 className="font-semibold text-slate-800 text-sm mb-3 flex items-center gap-2">
+                      <Building className="h-4 w-4 text-blue-500" /> Deliver Candidate to Client
+                    </h4>
+                    {isEditMode && viewingCandidate ? (
+                      <div className="flex flex-col sm:flex-row gap-3 items-end">
+                        <div className="flex-1 min-w-[200px] space-y-1">
+                          <label className="text-xs">Client *</label>
+                          <select 
+                            id="deliver-client-select" 
+                            required 
+                            value={selectedDeliverClientId}
+                            onChange={(e) => setSelectedDeliverClientId(e.target.value)}
+                            className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="">Select Client</option>
+                            {clients.map(cl => (
+                              <option key={cl._id} value={cl._id}>{cl.companyName}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex-1 min-w-[200px] space-y-1">
+                          <label className="text-xs">Associated Job *</label>
+                          <select 
+                            id="deliver-job-select" 
+                            required
+                            className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="">{selectedDeliverClientId ? 'Select a Job' : 'Select a client first'}</option>
+                            {filteredJobs.map(j => (
+                              <option key={j._id} value={j._id}>{j.position} ({j.jobCode}) - {j.clientName}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <button 
+                          type="button" 
+                          onClick={() => {
+                            const clientIdSelect = document.getElementById('deliver-client-select');
+                            const jobIdSelect = document.getElementById('deliver-job-select');
+                            if (clientIdSelect && clientIdSelect.value && jobIdSelect && jobIdSelect.value) {
+                              handleDeliverToClient(clientIdSelect.value, jobIdSelect.value);
+                              setSelectedDeliverClientId('');
+                              jobIdSelect.value = '';
+                            } else {
+                              toast({ title: 'Error', description: 'Please select both client and associated job', variant: 'destructive' });
+                            }
+                          }}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg text-sm transition shrink-0"
+                        >
+                          Deliver Profile
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-xs text-slate-500 mb-3">Select an initial client and role to deliver this candidate to upon creation.</p>
+                        <div className="flex flex-col sm:flex-row gap-3 items-end">
+                          <div className="flex-1 min-w-[200px] space-y-1">
+                            <label className="text-xs">Client (Optional)</label>
+                            <select 
+                              id="deliver-client-select" 
+                              value={selectedDeliverClientId}
+                              onChange={(e) => setSelectedDeliverClientId(e.target.value)}
+                              className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="">Select Client</option>
+                              {clients.map(cl => (
+                                <option key={cl._id} value={cl._id}>{cl.companyName}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex-1 min-w-[200px] space-y-1">
+                            <label className="text-xs">Associated Job (Optional)</label>
+                            <select 
+                              id="deliver-job-select" 
+                              className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="">{selectedDeliverClientId ? 'No Associated Job' : 'Select a client first'}</option>
+                              {filteredJobs.map(j => (
+                                <option key={j._id} value={j._id}>{j.position} ({j.jobCode}) - {j.clientName}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </section>
 
@@ -1405,15 +2057,15 @@ export default function AdminCandidates() {
               </section>
 
               {/* ── Custom Fields (Tenant-defined dynamic fields) ── */}
-              {tenantCustomFields.length > 0 && (
+              {tenantCustomFields.filter(cf => !isHidden(cf.fieldName)).length > 0 && (
                 <section>
                   <h3 className="text-base font-semibold text-blue-700 border-b border-blue-100 pb-2 mb-4 flex items-center gap-2">
                     <Settings2 className="h-4 w-4" />
                     Additional Details
-                    <span className="ml-2 text-xs font-normal text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{tenantCustomFields.length} custom field{tenantCustomFields.length !== 1 ? 's' : ''}</span>
+                    <span className="ml-2 text-xs font-normal text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{tenantCustomFields.filter(cf => !isHidden(cf.fieldName)).length} custom field{tenantCustomFields.filter(cf => !isHidden(cf.fieldName)).length !== 1 ? 's' : ''}</span>
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {tenantCustomFields.map((cf, idx) => (
+                    {tenantCustomFields.filter(cf => !isHidden(cf.fieldName)).map((cf, idx) => (
                       <div key={idx}>
                         <label className="block text-sm font-medium mb-1 text-slate-700 flex items-center gap-1.5">
                           {cf.fieldName}
@@ -1440,66 +2092,7 @@ export default function AdminCandidates() {
                       {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </div>
-                  <div className="space-y-1">
-                    <label className="block text-sm font-medium mb-1 text-slate-700 font-bold text-blue-600">
-                      Current Status: {formData.status[formData.status.length - 1] || 'None'}
-                      {formData.status.some(s => ['Joined', 'Rejected'].includes(s)) && (
-                        <span className="ml-2 text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wider">Final Stage</span>
-                      )}
-                    </label>
 
-                    {!formData.status.some(s => ['Joined', 'Rejected'].includes(s)) ? (
-                      <div className="flex items-center gap-2">
-                        <select
-                          value=""
-                          onChange={(e) => addStatus(e.target.value)}
-                          className={inputCls(errors.status)}
-                        >
-                          <option value="">Move to next stage…</option>
-                          {STATUS_FLOW_ORDER.filter(s => !formData.status.includes(s)).map((s) => (
-                            <option key={s} value={s}>{s}</option>
-                          ))}
-                        </select>
-                        {formData.status.length > 1 && (
-                          <button
-                            onClick={() => setFormData(prev => ({ ...prev, status: prev.status.slice(0, -1) }))}
-                            className="px-3 py-2 text-xs text-red-500 hover:bg-red-50 rounded border border-red-200 transition"
-                            title="Rollback to previous status"
-                          >
-                            Undo
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className={`p-4 rounded-xl border flex flex-col gap-3 ${formData.status[formData.status.length - 1] === 'Joined'
-                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                          : 'bg-red-50 border-red-200 text-red-800'
-                        }`}>
-                        <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-[10px]">
-                          {formData.status[formData.status.length - 1] === 'Joined' ? (
-                            <><CheckCircle2 className="h-4 w-4" /> Progress Completed</>
-                          ) : (
-                            <><X className="h-4 w-4" /> Process Ended</>
-                          )}
-                        </div>
-                        <p className="text-sm">
-                          {formData.status[formData.status.length - 1] === 'Joined'
-                            ? 'Success! The candidate has successfully joined.'
-                            : 'The candidate has been rejected at this stage.'}
-                        </p>
-                        <button
-                          onClick={() => setFormData(prev => ({ ...prev, status: prev.status.slice(0, -1) }))}
-                          className={`text-xs font-bold w-fit px-3 py-1.5 rounded-lg border transition ${formData.status[formData.status.length - 1] === 'Joined'
-                              ? 'border-emerald-200 hover:bg-emerald-100'
-                              : 'border-red-200 hover:bg-red-100'
-                            }`}
-                        >
-                          Undo / Re-open Pipeline
-                        </button>
-                      </div>
-                    )}
-                    {errors.status && <p className="text-xs text-red-500 mt-1">{errors.status}</p>}
-                  </div>
                   {isManagerOrAdmin && (
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium mb-1 text-slate-700">Assign to User</label>
@@ -1516,6 +2109,86 @@ export default function AdminCandidates() {
                 </div>
               </section>
 
+              {isEditMode && viewingCandidate && (
+                <div className="mt-8 border-t pt-6">
+                  {/* Deliveries & Submissions Section */}
+                  <div className="bg-slate-50 p-4 rounded-lg space-y-3 col-span-2">
+                    <h3 className="font-semibold text-slate-800 border-b pb-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Building className="h-4 w-4" /> Client Deliveries & Pipeline
+                      </div>
+                    </h3>
+                    
+                    {/* List of current deliveries */}
+                    <div className="space-y-4">
+                      {!viewingCandidate.submissions || viewingCandidate.submissions.length === 0 ? (
+                        <p className="text-sm text-slate-500 italic">No client deliveries recorded for this candidate.</p>
+                      ) : (
+                        <div className="space-y-4">
+                          {viewingCandidate.submissions.map((sub) => (
+                            <div key={sub._id} className="border border-slate-200 rounded-xl p-4 bg-white shadow-sm space-y-4">
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                                <div>
+                                  <div className="font-bold text-slate-900 text-base">
+                                    {sub.clientName}
+                                    {sub.jobId && sub.jobId.position && (
+                                      <span className="text-sm font-normal text-slate-500 ml-2">({sub.jobId.position})</span>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2 mt-1">
+                                    <span className="text-xs font-mono font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
+                                      {sub.clientCandidateId || '-'}
+                                    </span>
+                                    <span className="text-xs text-slate-400">
+                                      Delivered: {formatDate(sub.dateAdded || sub.createdAt)}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end">
+                                  <select
+                                    value={sub.status}
+                                    onChange={(e) => handleUpdateSubmission(sub._id, e.target.value, sub.remarks)}
+                                    className="w-[160px] border border-slate-300 rounded-lg px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  >
+                                    {STATUS_FLOW_ORDER.map(st => (
+                                      <option key={st} value={st}>{st}</option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteSubmission(sub._id)}
+                                    className="p-2 text-red-600 hover:bg-red-50 hover:text-red-700 rounded-lg border border-slate-200 hover:border-red-100 transition shrink-0"
+                                    title="Retract/Delete Delivery"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </div>
+
+
+                              {/* Remarks/Notes for this delivery */}
+                              <div className="space-y-1">
+                                <label className="text-xs text-slate-500">Remarks / Updates</label>
+                                <input
+                                  type="text"
+                                  placeholder="Add feedback/remarks for this client submission..."
+                                  defaultValue={sub.remarks || ''}
+                                  onBlur={(e) => {
+                                    if (e.target.value !== (sub.remarks || '')) {
+                                      handleUpdateSubmission(sub._id, sub.status, e.target.value);
+                                    }
+                                  }}
+                                  className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Dialog Footer */}
@@ -1551,13 +2224,106 @@ export default function AdminCandidates() {
                   ['Email', viewCandidate.email],
                   ['Contact', viewCandidate.contact],
                   !isHidden('alternateNumber') && ['Alt Contact', viewCandidate.alternateNumber],
+                  !isHidden('gender') && ['Gender', viewCandidate.gender],
+                  !isHidden('linkedin') && ['LinkedIn', viewCandidate.linkedin],
                   ['Role', viewCandidate.position],
-                  ['Client', viewCandidate.client],
+                  ['Skills', (
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {Array.isArray(viewCandidate.skills) ? (
+                        viewCandidate.skills.map(s => (
+                          <span key={s} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50/50 text-blue-700 border border-blue-200">
+                            {s}
+                          </span>
+                        ))
+                      ) : (
+                        viewCandidate.skills ? (
+                          viewCandidate.skills.split(',').map(s => s.trim()).filter(Boolean).map(s => (
+                            <span key={s} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50/50 text-blue-700 border border-blue-200">
+                              {s}
+                            </span>
+                          ))
+                        ) : '-'
+                      )}
+                    </div>
+                  )],
+                  ['Client Deliveries', viewCandidate.submissions && viewCandidate.submissions.length > 0 ? (
+                    <div className="flex flex-col gap-4 mt-2">
+                      {viewCandidate.submissions.map(sub => {
+                        const pipelineSteps = ['Submitted', 'Shared Profiles', 'Yet to attend', 'Turnups', 'Selected', 'Joined'];
+                        const isFailure = ['Rejected', 'No Show', 'Backout', 'Hold'].includes(sub.status);
+                        const currentIndex = pipelineSteps.indexOf(sub.status);
+
+                        return (
+                          <div key={sub._id} className="border border-slate-200 bg-white p-4 rounded-xl shadow-sm">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-4">
+                              <div>
+                                <div className="font-bold text-slate-900">
+                                  {sub.clientName}
+                                  {sub.jobId && sub.jobId.position && (
+                                    <span className="text-xs font-normal text-slate-500 ml-2">({sub.jobId.position})</span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-slate-400 mt-0.5">
+                                  ID: <span className="font-semibold text-blue-600">{sub.clientCandidateId || '-'}</span> • Date: {new Date(sub.dateAdded || sub.createdAt).toLocaleDateString()}
+                                </div>
+                              </div>
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border ${getStatusBadgeColor(sub.status)}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${getStatusDotColor(sub.status)}`} />
+                                {sub.status}
+                              </span>
+                            </div>
+
+                            <div className="relative pt-4 pb-2 px-2 hidden sm:block">
+                              <div className="absolute top-7 left-4 right-4 h-1 bg-slate-100 rounded-full z-0"></div>
+                              
+                              <div className="relative flex justify-between z-10">
+                                {pipelineSteps.map((step, idx) => {
+                                  let isActive = false;
+                                  let isPast = false;
+                                  
+                                  if (currentIndex !== -1) {
+                                    isActive = idx === currentIndex;
+                                    isPast = idx < currentIndex;
+                                  } else {
+                                    if (idx === 0) isPast = true;
+                                  }
+                                  
+                                  const isCompleted = isPast || isActive;
+                                  
+                                  return (
+                                    <div key={step} className="flex flex-col items-center gap-2 w-16 relative">
+                                      <div className={`w-7 h-7 rounded-full flex items-center justify-center border-2 text-xs font-bold bg-white transition-colors duration-300 z-10 ${
+                                        isCompleted ? 'border-blue-500 text-blue-600' : 'border-slate-200 text-slate-300'
+                                      }`}>
+                                        {isPast ? <Check className="w-4 h-4 text-blue-500" /> : idx + 1}
+                                      </div>
+                                      <span className={`text-[10px] text-center font-medium leading-tight ${
+                                        isCompleted ? 'text-slate-800' : 'text-slate-400'
+                                      }`}>
+                                        {step}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            {isFailure && (
+                              <div className="mt-4 px-3 py-2 bg-red-50/50 border border-red-100 rounded-lg text-xs flex items-center justify-center gap-2 text-red-600 font-medium">
+                                <Ban className="w-3.5 h-3.5" /> Pipeline stopped: {sub.status}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : 'No client deliveries'],
                   !isHidden('currentCompany') && ['Current Company', viewCandidate.currentCompany],
+                  !isHidden('industry') && ['Industry', viewCandidate.industry],
                   !isHidden('currentLocation') && ['Current Location', viewCandidate.currentLocation],
                   !isHidden('preferredLocation') && ['Preferred Location', viewCandidate.preferredLocation],
                   !isHidden('totalExperience') && ['Total Exp', viewCandidate.totalExperience ? `${viewCandidate.totalExperience} Yrs` : null],
                   !isHidden('relevantExperience') && ['Relevant Exp', viewCandidate.relevantExperience ? `${viewCandidate.relevantExperience} Yrs` : null],
+                  !isHidden('education') && ['Educational Qualification', viewCandidate.education],
                   !isHidden('ctc') && ['Current CTC', viewCandidate.ctc ? `${viewCandidate.ctc} LPA` : null],
                   !isHidden('currentTakeHome') && ['Current Take Home', viewCandidate.currentTakeHome],
                   !isHidden('ectc') && ['Expected CTC', viewCandidate.ectc ? `${viewCandidate.ectc} LPA` : null],
@@ -1569,14 +2335,13 @@ export default function AdminCandidates() {
                   !isHidden('offersInHand') && ['Offers in Hand', viewCandidate.offersInHand ? `Yes${viewCandidate.offerPackage ? ` (${viewCandidate.offerPackage})` : ''}` : 'No'],
                   ['Source', viewCandidate.source],
                   ['Recruiter', typeof viewCandidate.recruiterId === 'object' ? getRecruiterName(viewCandidate.recruiterId) : viewCandidate.recruiterName],
-                  ['Status', Array.isArray(viewCandidate.status) ? viewCandidate.status.join(', ') : viewCandidate.status],
                   ['Remarks', viewCandidate.remarks],
                   // Custom fields
                   ...(viewCandidate.customFields ? Object.entries(viewCandidate.customFields).map(([k, v]) => [k, v]) : []),
                 ].filter(Boolean).map(([label, val]) => val ? (
-                  <div key={label} className="col-span-2 md:col-span-1 border-b border-slate-100 pb-2">
+                  <div key={label} className={`border-b border-slate-100 pb-2 ${label === 'Client Deliveries' ? 'col-span-2' : 'col-span-2 md:col-span-1'}`}>
                     <span className="block text-xs font-semibold text-slate-500 uppercase mb-1">{label}</span>
-                    <span className="text-slate-900 font-medium">{val}</span>
+                    <div className="text-slate-900 font-medium">{val}</div>
                   </div>
                 ) : null)}
               </div>
@@ -1728,6 +2493,220 @@ export default function AdminCandidates() {
           onClose={() => setIsTodaySubOpen(false)}
           getCandidateId={getCandidateId}
         />
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          BULK IMPORT PREVIEW MODAL
+      ══════════════════════════════════════════════════════════════════════ */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
+
+            {/* Header */}
+            <div className="p-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                  <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                  Import Candidates — Bulk Upload
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Supported: <span className="font-semibold">.xlsx, .xls, .csv</span>
+                </p>
+              </div>
+              <button
+                onClick={() => { resetImportState(); setIsImportModalOpen(false); }}
+                className="text-slate-400 hover:text-slate-700 font-bold text-2xl leading-none px-2"
+              >×</button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
+              {/* Top action bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <button
+                  onClick={downloadCandidateTemplate}
+                  className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition"
+                >
+                  <Download className="w-4 h-4" /> Download Sample Template
+                </button>
+                {importParsedData && !isImporting && !importResult && (
+                  <button
+                    onClick={() => { setImportParsedData(null); setImportFileName(''); setImportParseProgress(0); if (importFileInputRef.current) importFileInputRef.current.value = ''; }}
+                    className="text-xs text-slate-500 hover:text-slate-700 underline transition"
+                  >
+                    Upload a different file
+                  </button>
+                )}
+              </div>
+
+              {/* Required fields info */}
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <p className="text-xs font-bold text-blue-800 mb-2 uppercase tracking-wider">Required Columns (★) — all other Add Candidate fields are accepted in any order</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: 'First Name ★', hint: 'or "Full Name"' },
+                    { label: 'Email ★',      hint: '"Email Address", "E-Mail"' },
+                    { label: 'Phone ★',      hint: '"Mobile", "Contact" (10 digits)' },
+                    { label: 'Position ★',   hint: '"Role", "Job Title", "Designation"' },
+                  ].map(({ label, hint }) => (
+                    <div key={label} className="flex flex-col bg-white border border-blue-200 rounded-lg px-3 py-1.5 text-xs min-w-fit">
+                      <span className="font-semibold text-blue-800">{label}</span>
+                      <span className="text-blue-500">{hint}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-blue-500 mt-2">
+                  Columns can be in <span className="font-semibold">any order</span>. Column names are matched automatically (fuzzy). Missing required fields will mark the row as invalid.
+                </p>
+              </div>
+
+              {/* Drag & drop zone — shown when no file parsed yet */}
+              {!importParsedData && !isParsing && (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setImportDragOver(true); }}
+                  onDragLeave={() => setImportDragOver(false)}
+                  onDrop={handleImportDrop}
+                  onClick={() => importFileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${
+                    importDragOver
+                      ? 'border-emerald-500 bg-emerald-50 scale-[1.01]'
+                      : 'border-slate-300 hover:border-emerald-400 hover:bg-emerald-50/30'
+                  }`}
+                >
+                  <FileSpreadsheet className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+                  <p className="font-semibold text-slate-600">
+                    {importDragOver ? 'Drop your file here!' : 'Drag & drop your Excel/CSV file here'}
+                  </p>
+                  <p className="text-sm text-slate-400 mt-1">or <span className="text-emerald-600 font-medium underline">click to browse</span></p>
+                  <p className="text-xs text-slate-400 mt-3">.xlsx · .xls · .csv</p>
+                </div>
+              )}
+
+              {/* Parse progress */}
+              {isParsing && (
+                <div className="space-y-2 py-6 text-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-emerald-600 mx-auto" />
+                  <p className="text-sm font-medium text-slate-600">Parsing {importFileName}…</p>
+                  <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mx-auto max-w-sm">
+                    <div className="h-2 bg-emerald-500 rounded-full transition-all duration-300" style={{ width: `${importParseProgress}%` }} />
+                  </div>
+                  <p className="text-xs text-slate-400">{importParseProgress}%</p>
+                </div>
+              )}
+
+              {/* Post-import result */}
+              {importResult && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[
+                      { label: 'Total Rows',    value: importResult.totalRecords,          color: 'bg-slate-50 border-slate-200 text-slate-700' },
+                      { label: 'Imported',       value: importResult.importedSuccessfully,  color: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
+                      { label: 'Failed',         value: importResult.failedRecords,         color: 'bg-red-50 border-red-200 text-red-600' },
+                      { label: 'Duplicates',     value: importResult.duplicatesSkipped,     color: 'bg-amber-50 border-amber-200 text-amber-700' },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} className={`border rounded-xl p-4 text-center ${color}`}>
+                        <p className="text-2xl font-bold">{value}</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider mt-1 opacity-75">{label}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {importResult.errors?.length > 0 && (
+                    <button
+                      onClick={handleDownloadErrorReport}
+                      className="flex items-center gap-2 text-sm font-medium text-red-600 hover:text-red-800 border border-red-200 bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg transition"
+                    >
+                      <Download className="w-4 h-4" /> Download Error Report ({importResult.errors.length} rows)
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Preview table */}
+              {importParsedData && !importResult && (
+                <div className="space-y-3">
+                  {/* Summary bar */}
+                  <div className="flex flex-wrap gap-2 text-sm">
+                    <span className="px-3 py-1 bg-slate-100 rounded-full font-medium text-slate-700">Total: {importParsedData.totalCount}</span>
+                    <span className="px-3 py-1 bg-emerald-100 rounded-full font-medium text-emerald-700">✓ Valid: {importParsedData.validRows.length}</span>
+                    <span className="px-3 py-1 bg-red-100 rounded-full font-medium text-red-600">✗ Invalid: {importParsedData.invalidRows.length}</span>
+                    {importFileName && <span className="px-3 py-1 bg-blue-50 rounded-full text-blue-600 text-xs">{importFileName}</span>}
+                  </div>
+
+                  <div className="overflow-auto rounded-xl border border-slate-200 max-h-80">
+                    <table className="w-full text-xs min-w-[700px]">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 w-10">#</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Name</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Email</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Phone</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Position</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Client</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importParsedData.allRows.map((row, i) => (
+                          <tr
+                            key={i}
+                            className={`border-b last:border-0 ${row.valid ? 'bg-white hover:bg-emerald-50/30' : 'bg-red-50 hover:bg-red-100/40'}`}
+                          >
+                            <td className="px-3 py-2 text-slate-400">{row._rowNum || i + 1}</td>
+                            <td className="px-3 py-2 font-medium text-slate-800">{row.firstName} {row.lastName}</td>
+                            <td className="px-3 py-2 text-slate-600">{row.email}</td>
+                            <td className="px-3 py-2 text-slate-600">{row.contact}</td>
+                            <td className="px-3 py-2 text-slate-600">{row.position}</td>
+                            <td className="px-3 py-2 text-slate-600">{row.client}</td>
+                            <td className="px-3 py-2">
+                              {row.valid ? (
+                                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-semibold">Valid</span>
+                              ) : (
+                                <span className="text-red-600 font-medium" title={row.errors?.join('; ')}>
+                                  ✗ {row.errors?.[0]}
+                                  {row.errors?.length > 1 && <span className="text-red-400"> +{row.errors.length - 1} more</span>}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-between items-center shrink-0 gap-3 flex-wrap">
+              <p className="text-xs text-slate-500">
+                {importParsedData && !importResult
+                  ? `${importParsedData.validRows.length} valid row(s) will be imported`
+                  : importResult
+                  ? `Import completed — ${importResult.importedSuccessfully} added to database`
+                  : 'Upload an Excel or CSV file to preview candidates before importing'}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { resetImportState(); setIsImportModalOpen(false); }}
+                  className="px-5 py-2 border border-slate-300 bg-white rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 transition"
+                >
+                  {importResult ? 'Close' : 'Cancel'}
+                </button>
+                {importParsedData && !importResult && (
+                  <button
+                    onClick={handleConfirmImport}
+                    disabled={isImporting || importParsedData.validRows.length === 0}
+                    className="flex items-center gap-2 px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+                    {isImporting ? 'Importing…' : `Import ${importParsedData.validRows.length} Candidate(s)`}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

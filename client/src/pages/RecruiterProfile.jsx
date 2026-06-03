@@ -10,6 +10,7 @@ import {
   Phone, MapPin, Calendar, Hash, Trash2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { getDisplayRole } from '@/context/AuthContext';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -379,7 +380,7 @@ export default function RecruiterProfile() {
                   </p>
                   <div className="flex justify-center flex-wrap gap-2 mt-2">
                     <Badge className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 text-xs">
-                      {profile.role === 'admin' ? 'Admin' : 'Recruiter'}
+                      {getDisplayRole(profile.role)}
                     </Badge>
                     {profile.recruiterId && (
                       <Badge variant="outline" className="text-slate-400 border-slate-200 text-xs">

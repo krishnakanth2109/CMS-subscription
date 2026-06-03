@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth, getDisplayRole } from '@/context/AuthContext';
 import {
   LayoutDashboard, Users, Briefcase, Calendar, MessageSquare,
   BarChart2, Settings, LogOut, ChevronLeft, ChevronRight,
@@ -96,7 +96,7 @@ export function DashboardSidebar({ collapsed, onToggle }) {
         {(!collapsed || isMobile) && user && (
           <div className="mb-3 px-1">
             <p className="text-sm font-semibold text-gray-800 dark:text-white truncate">{user.name}</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{userRole}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{getDisplayRole(userRole)}</p>
           </div>
         )}
         <button

@@ -1,632 +1,716 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, AreaChart, Area
 } from 'recharts';
 import {
-  Download, TrendingUp, Calendar, Loader2,
-  Users, ClipboardList, X, ChevronDown, RefreshCw,
+  Download, Users, Briefcase, Calendar, CheckCircle2,
+  XCircle, Clock, Search, Filter, Loader2, ChevronDown,
+  ChevronLeft, ChevronRight, FileText, Activity, Target, TrendingUp, UserCheck
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/+$/, '');
 const API_URL  = BASE_URL.endsWith('/api') ? BASE_URL : `${BASE_URL}/api`;
 
-const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f43f5e'];
 
-// ── Get safe YYYY-MM-DD from a date value
-const getSafeDate = (d) => {
-  if (!d) return '';
-  if (typeof d === 'string' && d.length >= 10) return d.substring(0, 10);
-  try { return new Date(d).toISOString().split('T')[0]; } catch (e) { return ''; }
+const safeDate = (d) => {
+  if (!d) return null;
+  const pd = new Date(d);
+  return isNaN(pd.getTime()) ? null : pd;
 };
 
-// ── Local YYYY-MM-DD today string
-const localDateStr = (d = new Date()) => {
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
+// ── CUSTOM HOOK FOR DATA FETCHING AND FILTERING ──
+function useReportsData(authHeaders, toast) {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState({ candidates: [], jobs: [], interviews: [], recruiters: [] });
 
-const tooltipStyle = {
-  contentStyle: {
-    backgroundColor: '#fff', border: '1px solid #e2e8f0',
-    borderRadius: '8px', color: '#0f172a', fontSize: '12px',
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-  },
-  formatter: (value, name) => [`${name} : ${value}`, ''],
-  labelStyle: { fontWeight: 700, color: '#1e293b', marginBottom: 4 },
-};
-const LegendLabel = (v) => <span style={{ color: '#475569', fontWeight: 600 }}>{v}</span>;
+  const [filters, setFilters] = useState({
+    dateStart: '',
+    dateEnd: '',
+    status: 'all',
+    recruiter: 'all',
+    department: 'all',
+    position: 'all',
+  });
 
-// ── Recruiter name resolver
-const getRecruiterName = (r) => {
-  if (!r) return '-';
-  if (typeof r === 'object') {
-    const first = r.firstName || '';
-    const last  = r.lastName  || '';
-    if (first || last) return `${first} ${last}`.trim();
-    if (r.name)     return r.name;
-    if (r.username) return r.username;
-    if (r.email)    return r.email;
-    return '-';
-  }
-  return '-';
-};
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Today Submissions Modal
-// ═════════════════════════════════════════════════════════════════════════════
-function TodaySubmissionsModal({ candidates, recruiters, onClose }) {
-  const todayStr = localDateStr();
-  const [selectedDate,    setSelectedDate]    = useState(todayStr);
-  const [recruiterFilter, setRecruiterFilter] = useState('all');
-
-  const filtered = useMemo(() => {
-    return candidates.filter(c => {
-      const d        = c.dateAdded || c.createdAt;
-      const dateMatch = getSafeDate(d) === selectedDate;
-      if (!dateMatch) return false;
-      if (recruiterFilter === 'all') return true;
-      const recId = typeof c.recruiterId === 'object' ? c.recruiterId?._id : c.recruiterId;
-      return String(recId) === String(recruiterFilter);
-    });
-  }, [candidates, selectedDate, recruiterFilter]);
-
-  const displayDate = selectedDate
-    ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-    : '';
-
-  const selectedRecruiterName = recruiterFilter === 'all'
-    ? 'all recruiters'
-    : (() => {
-        const found = recruiters.find(r => (r._id || r.id) === recruiterFilter);
-        return found ? getRecruiterName(found) : recruiterFilter;
-      })();
-
-  const getCandidateId = (c) =>
-    c.candidateId || c._id?.substring(c._id.length - 6).toUpperCase();
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[85vh] overflow-hidden flex flex-col">
-        <div className="flex items-start justify-between px-6 pt-5 pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-violet-500" />
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Day Submissions</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Viewing candidates submitted by {selectedRecruiterName}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <select
-              value={recruiterFilter}
-              onChange={e => setRecruiterFilter(e.target.value)}
-              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400 text-slate-700 min-w-[150px]"
-            >
-              <option value="all">All Recruiters</option>
-              {recruiters.map(r => (
-                <option key={r._id || r.id} value={r._id || r.id}>
-                  {getRecruiterName(r)}
-                </option>
-              ))}
-            </select>
-            <div className="flex items-center gap-1.5 border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 bg-white">
-              <Calendar className="h-3.5 w-3.5 text-slate-400" />
-              <input
-                type="date"
-                value={selectedDate}
-                max={todayStr}
-                onChange={e => setSelectedDate(e.target.value)}
-                className="border-none outline-none bg-transparent text-sm text-slate-700 cursor-pointer"
-              />
-            </div>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-        <div className="overflow-auto flex-1">
-          {filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-              <Calendar className="h-12 w-12 mb-3 opacity-30" />
-              <p className="text-sm font-medium">No submissions for {displayDate}</p>
-            </div>
-          ) : (
-            <table className="w-full text-sm text-left border-collapse">
-              <thead className="bg-slate-50 text-slate-500 text-xs font-semibold border-b sticky top-0 z-10">
-                <tr>
-                  <th className="px-4 py-3 whitespace-nowrap">CANDIDATE ID</th>
-                  <th className="px-4 py-3 whitespace-nowrap">CANDIDATE NAME</th>
-                  <th className="px-4 py-3 whitespace-nowrap">RECRUITER</th>
-                  <th className="px-4 py-3 whitespace-nowrap">POSITION</th>
-                  <th className="px-4 py-3 whitespace-nowrap">CLIENT</th>
-                  <th className="px-4 py-3 whitespace-nowrap">STATUS</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filtered.map(c => {
-                  const statusArr = Array.isArray(c.status) ? c.status : [c.status || 'Submitted'];
-                  return (
-                    <tr key={c._id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs text-blue-600 font-bold whitespace-nowrap">
-                        {getCandidateId(c)}
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">
-                        {c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim() || '—'}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
-                        {typeof c.recruiterId === 'object'
-                          ? getRecruiterName(c.recruiterId)
-                          : c.recruiterName || '—'}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{c.position || '—'}</td>
-                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{c.client || '—'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="flex flex-wrap gap-1">
-                          {statusArr.map(s => (
-                            <span key={s}
-                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                s === 'Selected' || s === 'Joined'
-                                  ? 'bg-green-100 text-green-800'
-                                  : s === 'Rejected' || s === 'No Show' || s === 'Backout'
-                                    ? 'bg-red-100 text-red-700'
-                                    : 'bg-blue-100 text-blue-800'
-                              }`}>
-                              {s}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-        <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-          <p className="text-xs text-slate-500">
-            Showing <span className="font-semibold text-slate-700">{filtered.length}</span> submissions.
-          </p>
-          <button onClick={onClose}
-            className="px-4 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 border border-slate-300 rounded-lg hover:bg-white transition-colors">
-            Close Window
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-export default function AdminReports() {
-  const { toast }       = useToast();
-  const { authHeaders } = useAuth();
-
-  const [loading,    setLoading]    = useState(true);
-  const [fetchError, setFetchError] = useState(false);
-
-  // Filters
-  const [selectedMonth, setSelectedMonth] = useState('all');
-  const [selectedWeek,  setSelectedWeek]  = useState('all');
-  const [selectedDate,  setSelectedDate]  = useState('');
-
-  // Report data 
-  const [overview,      setOverview]      = useState({ totalCandidates: 0, activeRecruiters: 0, conversionRate: '0%' });
-  const [recruiterPerf, setRecruiterPerf] = useState([]);
-  const [monthlyData,   setMonthlyData]   = useState([]);
-
-  // All candidates + recruiters
-  const [allCandidates, setAllCandidates] = useState([]);
-  const [allRecruiters, setAllRecruiters] = useState([]);
-  const [todayCount,    setTodayCount]    = useState(0);
-
-  // Modal
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-
-  const getHeaders = useCallback(async () => {
-    const ah = await authHeaders();
-    return { 'Content-Type': 'application/json', ...ah };
-  }, [authHeaders]);
-
-  // ── Main fetch: Fetch candidates directly to build foolproof local charts ──────────
-  const fetchAll = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
-    setFetchError(false);
     try {
-      const headers = await getHeaders();
+      const headers = await authHeaders();
+      const h = { 'Content-Type': 'application/json', ...headers };
 
-      const [candRes, recRes] = await Promise.all([
-        fetch(`${API_URL}/candidates`, { headers }),
-        fetch(`${API_URL}/recruiters`, { headers }),
+      const [cRes, jRes, iRes, rRes] = await Promise.all([
+        fetch(`${API_URL}/candidates`, { headers: h }),
+        fetch(`${API_URL}/jobs`, { headers: h }),
+        fetch(`${API_URL}/interviews`, { headers: h }),
+        fetch(`${API_URL}/recruiters`, { headers: h }),
       ]);
 
-      if (candRes.ok) {
-        const cands = await candRes.json();
-        setAllCandidates(Array.isArray(cands) ? cands : []);
-      }
+      const candidates = cRes.ok ? await cRes.json() : [];
+      const jobs = jRes.ok ? await jRes.json() : [];
+      const interviews = iRes.ok ? await iRes.json() : [];
+      const recruiters = rRes.ok ? await rRes.json() : [];
 
-      if (recRes.ok) {
-        const recs = await recRes.json();
-        setAllRecruiters(Array.isArray(recs) ? recs : []);
-      }
+      setData({
+        candidates: Array.isArray(candidates) ? candidates : [],
+        jobs: Array.isArray(jobs) ? jobs : [],
+        interviews: Array.isArray(interviews) ? interviews : [],
+        recruiters: Array.isArray(recruiters) ? recruiters : [],
+      });
     } catch (err) {
-      console.error('[AdminReports] fetch error:', err);
-      setFetchError(true);
-      toast({ title: 'Error', description: 'Failed to load reports.', variant: 'destructive' });
+      console.error(err);
+      toast({ title: 'Error', description: 'Failed to fetch report data', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [getHeaders, toast]);
+  }, [authHeaders, toast]);
 
-  // Trigger initial fetch
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  // ── This effect recalculates the stats immediately whenever filters change ─────────
-  useEffect(() => {
-    if (!allCandidates || allCandidates.length === 0) return;
+  // Filtered Data
+  const filteredData = useMemo(() => {
+    const { candidates, jobs, interviews } = data;
+    
+    const fc = candidates.filter(c => {
+      // Date filter
+      if (filters.dateStart || filters.dateEnd) {
+        const cd = safeDate(c.dateAdded || c.createdAt);
+        if (!cd) return false;
+        if (filters.dateStart && cd < new Date(filters.dateStart)) return false;
+        if (filters.dateEnd && cd > new Date(filters.dateEnd + 'T23:59:59')) return false;
+      }
+      
+      // Status filter
+      if (filters.status !== 'all') {
+        const s = Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status;
+        if (!s || s.toLowerCase() !== filters.status.toLowerCase()) return false;
+      }
+      
+      // Recruiter filter
+      if (filters.recruiter !== 'all') {
+        const rid = typeof c.recruiterId === 'object' ? c.recruiterId?._id : c.recruiterId;
+        if (String(rid) !== String(filters.recruiter)) return false;
+      }
+      
+      // Dept/Client filter
+      if (filters.department !== 'all') {
+        if (c.client !== filters.department) return false;
+      }
 
-    // 1. Compute today count
-    const today = localDateStr();
-    const todayCands = allCandidates.filter(c => getSafeDate(c.dateAdded || c.createdAt) === today);
-    setTodayCount(todayCands.length);
+      // Position filter
+      if (filters.position !== 'all') {
+        if (c.position !== filters.position) return false;
+      }
+      
+      return true;
+    });
 
-    // 2. Filter the candidates array by selected month/date/week
-    const filtered = allCandidates.filter(c => {
-      const d = new Date(c.dateAdded || c.createdAt);
-      if (isNaN(d)) return false;
-
-      // Filter by Exact Date
-      if (selectedDate) return getSafeDate(d) === selectedDate;
-
-      // Filter by Month
-      if (selectedMonth !== 'all') {
-        if (d.getMonth() !== parseInt(selectedMonth)) return false;
-        
-        // Filter by Week
-        if (selectedWeek !== 'all') {
-           const day = d.getDate();
-           const w = Math.ceil(day / 7);
-           const assignedWeek = w > 4 ? 4 : w; // Max 4 weeks
-           if (assignedWeek !== parseInt(selectedWeek)) return false;
-        }
+    const fInterviews = interviews.filter(i => {
+      if (filters.dateStart || filters.dateEnd) {
+        const id = safeDate(i.interviewDate);
+        if (!id) return false;
+        if (filters.dateStart && id < new Date(filters.dateStart)) return false;
+        if (filters.dateEnd && id > new Date(filters.dateEnd + 'T23:59:59')) return false;
+      }
+      if (filters.recruiter !== 'all') {
+        const rid = typeof i.recruiterId === 'object' ? i.recruiterId?._id : i.recruiterId;
+        if (String(rid) !== String(filters.recruiter)) return false;
       }
       return true;
     });
 
-    // 3. Compute KPI Overview
-    const total = filtered.length;
-    let selCount = 0, joinCount = 0;
-    filtered.forEach(c => {
-       const s = Array.isArray(c.status) ? c.status[0] : c.status;
-       if (s?.includes('Select')) selCount++;
-       if (s?.includes('Joined')) joinCount++;
-    });
-    const conv = selCount > 0 ? Math.round((joinCount / selCount) * 100) + '%' : '0%';
-    setOverview({ totalCandidates: total, activeRecruiters: allRecruiters.length, conversionRate: conv });
+    return { candidates: fc, jobs, interviews: fInterviews };
+  }, [data, filters]);
 
-    // 4. Compute Recruiter Performance (Recruiters Tab)
-    const rMap = {};
-    filtered.forEach(c => {
-       const rName = typeof c.recruiterId === 'object' ? getRecruiterName(c.recruiterId) : (c.recruiterName || 'Unknown');
-       if (!rMap[rName]) rMap[rName] = { name: rName, Submissions: 0, Turnups: 0, Selected: 0, Joined: 0 };
-       
-       rMap[rName].Submissions++;
-       const s = Array.isArray(c.status) ? c.status[0] : c.status;
-       if (s?.includes('Turnup')) rMap[rName].Turnups++;
-       if (s?.includes('Select')) rMap[rName].Selected++;
-       if (s?.includes('Joined')) rMap[rName].Joined++;
-    });
-    setRecruiterPerf(Object.values(rMap));
-
-    // 5. Compute Monthly Trends (Trends Tab) - Uses ALL candidates to show full trend
-    const mMap = {};
-    MONTH_SHORT.forEach(m => mMap[m] = { month: m, candidates: 0, joined: 0, selected: 0, rejected: 0, hold: 0 });
-    
-    allCandidates.forEach(c => {
-       const d = new Date(c.dateAdded || c.createdAt);
-       if (isNaN(d)) return;
-       const mStr = MONTH_SHORT[d.getMonth()];
-       
-       if (mMap[mStr]) {
-          mMap[mStr].candidates++;
-          const s = Array.isArray(c.status) ? c.status[0] : c.status;
-          if (s?.includes('Joined')) mMap[mStr].joined++;
-          if (s?.includes('Select')) mMap[mStr].selected++;
-          if (s?.includes('Reject')) mMap[mStr].rejected++;
-          if (s?.includes('Hold')) mMap[mStr].hold++;
-       }
-    });
-    setMonthlyData(Object.values(mMap));
-
-  }, [allCandidates, allRecruiters, selectedMonth, selectedWeek, selectedDate]);
+  return { loading, data, filteredData, filters, setFilters, refetch: fetchData };
+}
 
 
-  const handleExport = async (format) => {
-    if (!recruiterPerf.length) {
-      toast({ title: 'No Data', description: 'No recruiter data for selected period.', variant: 'default' });
-      return;
-    }
-    setIsExporting(true);
-    try {
-      const mLabel = selectedMonth === 'all' ? 'All' : MONTH_SHORT[parseInt(selectedMonth)];
-      const wLabel = selectedWeek  === 'all' ? 'All' : `W${selectedWeek}`;
-      const suffix = selectedDate  || `${mLabel}_${wLabel}`;
-      if (format === 'excel') {
-        const ws = XLSX.utils.json_to_sheet(recruiterPerf);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Recruiter Report');
-        XLSX.writeFile(wb, `Recruiter_Report_${suffix}.xlsx`);
-      } else {
-        const doc = new jsPDF();
-        doc.text(`Recruiter Performance Report (${suffix})`, 14, 16);
-        autoTable(doc, {
-          startY: 20,
-          head: [['Recruiter','Submissions','Turnups','Selected','Joined']],
-          body: recruiterPerf.map(r => [r.name, r.Submissions, r.Turnups, r.Selected, r.Joined]),
-        });
-        doc.save(`Recruiter_Report_${suffix}.pdf`);
-      }
-      toast({ title: 'Success', description: `${format.toUpperCase()} exported.` });
-    } catch (err) {
-      toast({ title: 'Export Failed', description: 'Could not export.', variant: 'destructive' });
-    } finally {
-      setIsExporting(false);
-    }
+// ── MAIN COMPONENT ──
+export default function AdminReports() {
+  const { authHeaders } = useAuth();
+  const { toast } = useToast();
+  const { loading, data, filteredData, filters, setFilters, refetch } = useReportsData(authHeaders, toast);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Modal State
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState('');
+  const [modalCandidates, setModalCandidates] = useState([]);
+
+  // Interview Modal State
+  const [interviewModalOpen, setInterviewModalOpen] = useState(false);
+  const [interviewModalData, setInterviewModalData] = useState(null);
+
+  const openCandidateModal = (title, candidatesList) => {
+    setModalTitle(title);
+    setModalCandidates(candidatesList);
+    setModalOpen(true);
   };
 
-  const now         = new Date();
-  const dateDisplay = `${String(now.getDate()).padStart(2,'0')} ${MONTH_SHORT[now.getMonth()]} ${now.getFullYear()}`.toUpperCase();
-  const filterLabel = selectedDate
-    ? selectedDate
-    : `${selectedMonth === 'all' ? 'All Months' : MONTH_NAMES[parseInt(selectedMonth)]} / ${selectedWeek === 'all' ? 'All Weeks' : `Week ${selectedWeek}`}`;
+  // ── Metrics Calculation ──
+  const metrics = useMemo(() => {
+    const { candidates, jobs, interviews } = filteredData;
+    
+    let active = 0, selected = 0, rejected = 0;
+    candidates.forEach(c => {
+      const s = Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status;
+      if (s?.includes('Select') || s?.includes('Joined')) selected++;
+      else if (s?.includes('Reject')) rejected++;
+      else active++;
+    });
 
-  if (loading) return (
-    <div className="flex h-screen items-center justify-center bg-[#f0f2f8]">
-      <div className="flex flex-col items-center gap-3">
-        <Loader2 className="h-8 w-8 animate-spin text-[#1e2a78]" />
-        <p className="text-sm text-slate-500 font-medium">Loading analytics...</p>
+    const upcomingInts = interviews.filter(i => i.status === 'Scheduled' && safeDate(i.interviewDate) >= new Date()).length;
+    const openJobs = jobs.filter(j => j.active).length;
+
+    // Pipeline Data
+    const statusCounts = {};
+    candidates.forEach(c => {
+      const s = Array.isArray(c.status) ? c.status[c.status.length - 1] || 'Submitted' : c.status || 'Submitted';
+      statusCounts[s] = (statusCounts[s] || 0) + 1;
+    });
+    const pipelineData = Object.entries(statusCounts).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
+
+    // Source Data
+    const sourceCounts = {};
+    candidates.forEach(c => {
+      const src = c.source || 'Portal';
+      sourceCounts[src] = (sourceCounts[src] || 0) + 1;
+    });
+    const sourceData = Object.entries(sourceCounts).map(([name, value]) => ({ name, value }));
+
+    // Department/Client Data
+    const deptMap = {};
+    candidates.forEach(c => {
+      const dept = c.client || 'Unknown';
+      if (!deptMap[dept]) deptMap[dept] = { department: dept, total: 0, selected: 0, active: 0, allCandidates: [] };
+      deptMap[dept].total++;
+      deptMap[dept].allCandidates.push(c);
+      const s = Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status;
+      if (s?.includes('Select') || s?.includes('Joined')) deptMap[dept].selected++;
+      else if (!s?.includes('Reject')) deptMap[dept].active++;
+    });
+    const departmentData = Object.values(deptMap).sort((a,b) => b.total - a.total);
+
+    // Recruiter Performance
+    const recMap = {};
+    candidates.forEach(c => {
+      const recId = typeof c.recruiterId === 'object' ? c.recruiterId?._id : c.recruiterId;
+      const recName = typeof c.recruiterId === 'object' ? c.recruiterId?.firstName || c.recruiterName : c.recruiterName || 'Unknown';
+      if (!recMap[recId]) recMap[recId] = { id: recId, name: recName, managed: 0, hires: 0, reviews: 0, allCandidates: [] };
+      recMap[recId].managed++;
+      recMap[recId].allCandidates.push(c);
+      
+      const s = Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status;
+      if (s?.includes('Joined')) recMap[recId].hires++;
+      else if (s?.includes('Submitted')) recMap[recId].reviews++;
+    });
+    const recruiterData = Object.values(recMap).map(r => ({ ...r, conversion: r.managed ? ((r.hires/r.managed)*100).toFixed(1) : 0 }));
+
+    return {
+      total: candidates.length,
+      active, selected, rejected, upcomingInts, openJobs,
+      pipelineData, sourceData, departmentData, recruiterData
+    };
+  }, [filteredData]);
+
+
+  // ── Options for Dropdowns ──
+  const uniqueDepts = useMemo(() => [...new Set(data.candidates.map(c => c.client).filter(Boolean))], [data.candidates]);
+  const uniqueRoles = useMemo(() => [...new Set(data.candidates.map(c => c.position).filter(Boolean))], [data.candidates]);
+  const uniqueStatus = useMemo(() => [...new Set(data.candidates.map(c => Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status).filter(Boolean))], [data.candidates]);
+
+  // ── EXPORTS ──
+  const handleExport = (format) => {
+    setIsExporting(true);
+    try {
+      const exportData = filteredData.candidates.map(c => ({
+        ID: c.candidateId || '-',
+        Name: c.name || '-',
+        Email: c.email || '-',
+        Phone: c.contact || '-',
+        Department: c.client || '-',
+        Position: c.position || '-',
+        Source: c.source || '-',
+        Status: Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status,
+        Recruiter: typeof c.recruiterId === 'object' ? c.recruiterId?.firstName : c.recruiterName || '-',
+        DateAdded: safeDate(c.dateAdded || c.createdAt)?.toLocaleDateString() || '-'
+      }));
+
+      if (format === 'csv' || format === 'excel') {
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Candidates Report');
+        XLSX.writeFile(wb, `Report_${new Date().getTime()}.${format === 'csv' ? 'csv' : 'xlsx'}`);
+      } else if (format === 'pdf') {
+        const doc = new jsPDF('landscape');
+        doc.text('Candidate Reports', 14, 15);
+        autoTable(doc, {
+          startY: 20,
+          head: [['ID', 'Name', 'Department', 'Position', 'Status', 'Recruiter', 'Date']],
+          body: exportData.map(c => [c.ID, c.Name, c.Department, c.Position, c.Status, c.Recruiter, c.DateAdded]),
+          styles: { fontSize: 8 }
+        });
+        doc.save(`Report_${new Date().getTime()}.pdf`);
+      }
+      toast({ title: 'Success', description: `Exported as ${format.toUpperCase()}` });
+    } catch (e) {
+      toast({ title: 'Error', description: 'Failed to export', variant: 'destructive' });
+    }
+    setIsExporting(false);
+  };
+
+
+  // ── RENDER HELPERS ──
+  const StatCard = ({ title, value, icon: Icon, colorClass, trend }) => (
+    <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm flex flex-col hover:shadow-md transition-all duration-300">
+      <div className="flex justify-between items-start mb-4">
+        <div className={`p-3 rounded-xl ${colorClass}`}><Icon className="w-5 h-5" /></div>
+        {trend && <span className="text-xs font-bold text-emerald-500 bg-emerald-50 px-2 py-1 rounded-full">{trend}</span>}
       </div>
+      <h3 className="text-slate-500 text-sm font-semibold">{title}</h3>
+      <p className="text-3xl font-black text-slate-800 mt-1">{value}</p>
     </div>
   );
 
-  if (fetchError) return (
-    <div className="flex h-screen items-center justify-center bg-[#f0f2f8]">
-      <div className="flex flex-col items-center gap-4 text-center">
-        <p className="text-slate-700 font-semibold">Failed to load reports</p>
-        <button onClick={fetchAll}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-[#1e2a78] text-white text-sm font-semibold rounded-lg hover:bg-[#162060] transition">
-          <RefreshCw className="w-4 h-4" /> Retry
-        </button>
+  if (loading && !data.candidates.length) {
+    return (
+      <div className="flex-1 p-6 h-screen flex flex-col items-center justify-center bg-slate-50">
+        <Loader2 className="w-10 h-10 animate-spin text-blue-600 mb-4" />
+        <p className="text-slate-500 font-medium animate-pulse">Aggregating analytics data...</p>
       </div>
-    </div>
-  );
+    );
+  }
 
   return (
-    <div className="flex-1 p-6 overflow-y-auto bg-[#f0f2f8] min-h-screen">
-      <div className="max-w-7xl mx-auto space-y-5">
-
-        {/* ─── HERO ─────────────────────────────────────────────────── */}
-        <div className="relative rounded-2xl overflow-hidden bg-[#1e2a78] shadow-lg min-h-[110px]">
-          <div className="absolute inset-0 opacity-[0.07]"
-            style={{ backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
-          <div className="relative flex items-center justify-between px-8 py-6 gap-4">
-            <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-bold text-white leading-tight">Reports & Analysis</h1>
-              <p className="text-blue-200 text-sm mt-1">Get real-time insights to track performance and make better decisions.</p>
-            </div>
-            <div className="hidden md:block w-28 h-20 shrink-0 opacity-90">
-              <svg viewBox="0 0 120 88" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                <rect x="8"  y="48" width="72" height="36" rx="4"  fill="white" fillOpacity="0.12"/>
-                <rect x="16" y="56" width="12" height="22" rx="2"  fill="white" fillOpacity="0.55"/>
-                <rect x="34" y="63" width="12" height="15" rx="2"  fill="white" fillOpacity="0.55"/>
-                <rect x="52" y="58" width="12" height="20" rx="2"  fill="white" fillOpacity="0.55"/>
-                <circle cx="96" cy="26" r="16" fill="white" fillOpacity="0.12"/>
-                <circle cx="96" cy="21" r="6"  fill="white" fillOpacity="0.6"/>
-                <path d="M84 44 Q96 34 108 44" stroke="white" strokeWidth="2" strokeLinecap="round" fill="none" strokeOpacity="0.55"/>
-                <rect x="82" y="44" width="28" height="18" rx="3" fill="white" fillOpacity="0.12"/>
-                <line x1="88" y1="53" x2="104" y2="53" stroke="white" strokeWidth="1.5" strokeOpacity="0.4"/>
-                <line x1="88" y1="58" x2="100" y2="58" stroke="white" strokeWidth="1.5" strokeOpacity="0.4"/>
-              </svg>
-            </div>
-            <div className="text-right shrink-0">
-              <p className="text-blue-300 text-xs font-medium">Today</p>
-              <p className="text-white font-bold text-sm mt-0.5">{dateDisplay}</p>
-              <p className="text-blue-300 text-xs mt-0.5">Good to see you..!</p>
-            </div>
+    <div className="flex-1 bg-slate-50 min-h-screen overflow-y-auto pb-10">
+      
+      {/* ── HEADER ── */}
+      <div className="bg-white border-b border-slate-200 sticky top-0 z-20">
+        <div className="max-w-[1600px] mx-auto px-6 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">Recruitment Analytics</h1>
+            <p className="text-sm text-slate-500 font-medium mt-0.5">Comprehensive insights and pipeline tracking</p>
           </div>
-        </div>
 
-        {/* ─── FILTER + EXPORT ─────────────────────────────────────── */}
-        <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-sm flex-wrap">
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="inline-flex items-center gap-0 bg-[#f0f2f8] border border-slate-200 rounded-lg overflow-hidden">
-              <span className="px-3 py-2 text-xs font-bold text-slate-500 bg-[#e8eaf4] border-r border-slate-200 whitespace-nowrap select-none">Month</span>
-              <div className="relative flex items-center px-2 py-1.5">
-                <select value={selectedMonth} onChange={(e) => { setSelectedMonth(e.target.value); setSelectedDate(''); }}
-                  className="appearance-none text-sm font-semibold text-slate-800 bg-transparent border-none outline-none cursor-pointer pr-6 pl-1 min-w-[80px]">
-                  <option value="all">All</option>
-                  {MONTH_NAMES.map((m, i) => <option key={i} value={i}>{m}</option>)}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2 w-3.5 h-3.5 text-slate-400" />
-              </div>
-            </div>
-            <div className="inline-flex items-center gap-0 bg-[#f0f2f8] border border-slate-200 rounded-lg overflow-hidden">
-              <span className="px-3 py-2 text-xs font-bold text-slate-500 bg-[#e8eaf4] border-r border-slate-200 whitespace-nowrap select-none">Week</span>
-              <div className="relative flex items-center px-2 py-1.5">
-                <select value={selectedWeek} onChange={(e) => { setSelectedWeek(e.target.value); setSelectedDate(''); }}
-                  className="appearance-none text-sm font-semibold text-slate-800 bg-transparent border-none outline-none cursor-pointer pr-6 pl-1 min-w-[80px]">
-                  <option value="all">All</option>
-                  <option value="1">1st Week</option>
-                  <option value="2">2nd Week</option>
-                  <option value="3">3rd Week</option>
-                  <option value="4">4th Week</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2 w-3.5 h-3.5 text-slate-400" />
-              </div>
-            </div>
-            <div className={`inline-flex items-center gap-0 rounded-lg overflow-hidden border ${selectedDate ? 'bg-[#eef0fb] border-[#1e2a78]/30' : 'bg-[#f0f2f8] border-slate-200'}`}>
-              <span className={`px-3 py-2 text-xs font-bold border-r flex items-center gap-1.5 select-none whitespace-nowrap ${selectedDate ? 'bg-[#e6e9f9] border-[#1e2a78]/20 text-[#1e2a78]' : 'bg-[#e8eaf4] border-slate-200 text-slate-500'}`}>
-                <Calendar className="w-3 h-3" /> Date
-              </span>
-              <input type="date" value={selectedDate} max={localDateStr()}
-                onChange={(e) => { setSelectedDate(e.target.value); if (e.target.value) { setSelectedMonth('all'); setSelectedWeek('all'); } }}
-                className={`text-sm font-semibold bg-transparent border-none outline-none cursor-pointer px-2 py-2 w-[130px] ${selectedDate ? 'text-[#1e2a78]' : 'text-slate-600'}`} />
-            </div>
-            <button onClick={() => fetchAll()}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-500 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition shadow-sm">
-              <RefreshCw className="w-3 h-3" /> Refresh
+          <div className="flex flex-wrap items-center gap-2">
+            {/* <button onClick={() => handleExport('csv')} disabled={isExporting} className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2">
+              <FileText className="w-4 h-4" /> CSV
+            </button> */}
+            <button onClick={() => handleExport('excel')} disabled={isExporting} className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2">
+              <FileText className="w-4 h-4" /> Export Excel <Download className="w-4 h-4" />
             </button>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => handleExport('excel')} disabled={isExporting}
-              className="inline-flex items-center gap-2 px-4 py-2 h-9 rounded-lg bg-white border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition disabled:opacity-50 shadow-sm">
-              {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4 text-slate-500" />} Excel
-            </button>
-            <button onClick={() => handleExport('pdf')} disabled={isExporting}
-              className="inline-flex items-center gap-2 px-4 py-2 h-9 rounded-lg bg-[#1e2a78] text-sm font-semibold text-white hover:bg-[#162060] transition disabled:opacity-50 shadow-sm">
-              {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Export
+            <button onClick={() => handleExport('pdf')} disabled={isExporting} className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm">
+              {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Export PDF
             </button>
           </div>
         </div>
 
-        {/* ─── TABS ─────────────────────────────────────────────────── */}
-        <Tabs defaultValue="overview" className="space-y-5">
-          <TabsList className="flex w-fit bg-white border border-slate-200 rounded-xl p-1 shadow-sm gap-0.5">
-            {['overview','recruiters','trends'].map(tab => (
-              <TabsTrigger key={tab} value={tab}
-                className="px-5 py-2 text-sm font-semibold rounded-lg transition-all capitalize data-[state=active]:bg-[#1e2a78] data-[state=active]:text-white data-[state=active]:shadow-sm text-slate-500 hover:text-slate-700">
-                {tab}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        {/* ── TABS ── */}
+        <div className="max-w-[1600px] mx-auto px-6 flex gap-6 border-t border-slate-100">
+          {['overview', 'pipeline', 'departments', 'recruiters', 'interviews'].map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              className={`py-3 text-sm font-bold uppercase tracking-wider border-b-2 transition-colors ${
+                activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-700'
+              }`}>
+              {tab}
+            </button>
+          ))}
+        </div>
+      </div>
 
-          {/* ── OVERVIEW ── */}
-          <TabsContent value="overview" className="space-y-5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-semibold text-slate-600">Total Candidates</span>
-                  <TrendingUp className="h-4 w-4 text-blue-400" />
-                </div>
-                <div className="text-3xl font-bold text-slate-900">{overview.totalCandidates}</div>
-                <p className="text-xs text-slate-400 mt-1.5 truncate">{filterLabel}</p>
-              </div>
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-semibold text-slate-600">Total Recruiters</span>
-                  <Users className="h-4 w-4 text-purple-400" />
-                </div>
-                <div className="text-3xl font-bold text-slate-900">{overview.activeRecruiters}</div>
-                <p className="text-xs text-slate-400 mt-1.5">Total registered</p>
-              </div>
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-semibold text-slate-600">Conversion Rate</span>
-                  <Users className="h-4 w-4 text-green-400" />
-                </div>
-                <div className="text-3xl font-bold text-slate-900">{overview.conversionRate}</div>
-                <p className="text-xs text-slate-400 mt-1.5">Selected → Joined</p>
-              </div>
+      <div className="max-w-[1600px] mx-auto px-6 py-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        
+        {/* ── FILTERS BAR ── */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-500 px-2"><Filter className="w-4 h-4"/> Filters</div>
+          <input type="date" value={filters.dateStart} onChange={e => setFilters({...filters, dateStart: e.target.value})} className="px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" title="Start Date" />
+          <input type="date" value={filters.dateEnd} onChange={e => setFilters({...filters, dateEnd: e.target.value})} className="px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" title="End Date" />
+          
+          <select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} className="px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer">
+            <option value="all">All Statuses</option>
+            {uniqueStatus.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          
+          <select value={filters.department} onChange={e => setFilters({...filters, department: e.target.value})} className="px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer">
+            <option value="all">All Departments</option>
+            {uniqueDepts.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
 
-              {/* Today Submissions */}
-              <div onClick={() => setIsModalOpen(true)}
-                className="bg-[#eef0fb] rounded-xl border border-[#c9cef2] shadow-sm p-5 cursor-pointer hover:shadow-md hover:bg-[#e6e9f9] transition-all group">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-semibold text-[#1e2a78]">Today's Submissions</span>
-                  <ClipboardList className="h-4 w-4 text-[#1e2a78]" />
-                </div>
-                <div className="text-3xl font-bold text-[#1e2a78]">{todayCount}</div>
-                <p className="text-xs text-[#4a5ab8] mt-1.5">Added today</p>
-                <p className="text-[10px] font-bold text-[#7b8ccc] mt-1 uppercase tracking-wider group-hover:text-[#1e2a78] transition-colors">View All →</p>
-              </div>
+          <select value={filters.position} onChange={e => setFilters({...filters, position: e.target.value})} className="px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer">
+            <option value="all">All Roles</option>
+            {uniqueRoles.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+
+          <select value={filters.recruiter} onChange={e => setFilters({...filters, recruiter: e.target.value})} className="px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer">
+            <option value="all">All Recruiters</option>
+            {data.recruiters.map(r => <option key={r._id} value={r._id}>{r.firstName} {r.lastName}</option>)}
+          </select>
+        </div>
+
+        {/* ── OVERVIEW TAB ── */}
+        {activeTab === 'overview' && (
+          <>
+            {/* KPI CARDS */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+              <StatCard title="Total Candidates" value={metrics.total} icon={Users} colorClass="bg-blue-100 text-blue-600" />
+              <StatCard title="Active Process" value={metrics.active} icon={Activity} colorClass="bg-amber-100 text-amber-600" />
+              <StatCard title="Selected" value={metrics.selected} icon={CheckCircle2} colorClass="bg-emerald-100 text-emerald-600" trend="+12%" />
+              <StatCard title="Rejected" value={metrics.rejected} icon={XCircle} colorClass="bg-red-100 text-red-600" />
+              <StatCard title="Interviews" value={metrics.upcomingInts} icon={Calendar} colorClass="bg-purple-100 text-purple-600" />
+              <StatCard title="Open Positions" value={metrics.openJobs} icon={Briefcase} colorClass="bg-cyan-100 text-cyan-600" />
             </div>
-          </TabsContent>
 
-          {/* ── RECRUITERS ── */}
-          <TabsContent value="recruiters">
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-              <h3 className="font-semibold text-slate-800 text-base mb-1">Recruiter Performance Comparison</h3>
-              <p className="text-xs text-slate-400 mb-5">
-                Showing data for: <span className="font-semibold text-slate-600">{filterLabel}</span>
-                {recruiterPerf.length === 0 && <span className="ml-2 text-amber-500 font-semibold">— No data for selected period</span>}
-              </p>
-              {recruiterPerf.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-56 gap-3">
-                  <Users className="w-10 h-10 text-slate-200" />
-                  <p className="text-sm font-medium text-slate-400">No recruiter data for this period</p>
-                </div>
-              ) : (
-                <div className="h-[460px]">
+            {/* CHARTS */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                <h3 className="text-lg font-bold text-slate-800 mb-6">Candidate Pipeline Status</h3>
+                <div className="h-[350px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={recruiterPerf} barCategoryGap="30%">
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                      <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 12 }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                      <Tooltip {...tooltipStyle} />
-                      <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconSize={10} formatter={LegendLabel} />
-                      <Bar dataKey="Submissions" name="Submissions" fill="#3b82f6" radius={[4,4,0,0]} />
-                      <Bar dataKey="Turnups"     name="Turnups"     fill="#a855f7" radius={[4,4,0,0]} />
-                      <Bar dataKey="Selected"    name="Selected"    fill="#22c55e" radius={[4,4,0,0]} />
-                      <Bar dataKey="Joined"      name="Joined"      fill="#f97316" radius={[4,4,0,0]} />
+                    <BarChart data={metrics.pipelineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <XAxis dataKey="name" tick={{fontSize: 12, fill: '#64748b'}} axisLine={false} tickLine={false} />
+                      <YAxis tick={{fontSize: 12, fill: '#64748b'}} axisLine={false} tickLine={false} />
+                      <RechartsTooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)'}} />
+                      <Bar dataKey="value" fill="#3b82f6" radius={[6,6,0,0]} barSize={40} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-              )}
-            </div>
-          </TabsContent>
+              </div>
 
-          {/* ── TRENDS ── */}
-          <TabsContent value="trends">
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-              <h3 className="font-semibold text-slate-800 text-base mb-1">6-Month Trend Analysis</h3>
-              <p className="text-xs text-slate-400 mb-5">Submissions · Joined · Selected · Rejected · Hold over time</p>
-              {monthlyData.length === 0 ? (
-                <div className="flex items-center justify-center h-64 text-slate-400 text-sm">No trend data available</div>
-              ) : (
-                <div className="h-[420px]">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                <h3 className="text-lg font-bold text-slate-800 mb-6">Sourcing Channels</h3>
+                <div className="h-[300px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={monthlyData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                      <XAxis dataKey="month" tick={{ fill: '#64748b', fontSize: 12 }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                      <Tooltip {...tooltipStyle} />
-                      <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconSize={10} formatter={LegendLabel} />
-                      <Line type="monotone" dataKey="candidates" name="Submissions" stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 0 }} activeDot={{ r: 6 }} />
-                      <Line type="monotone" dataKey="joined"     name="Joined"      stroke="#22c55e" strokeWidth={2.5} dot={{ r: 4, fill: '#22c55e', strokeWidth: 0 }} activeDot={{ r: 6 }} />
-                      <Line type="monotone" dataKey="selected"   name="Selected"    stroke="#10b981" strokeWidth={2}   dot={{ r: 3, fill: '#10b981', strokeWidth: 0 }} activeDot={{ r: 5 }} strokeDasharray="5 3" />
-                      <Line type="monotone" dataKey="rejected"   name="Rejected"    stroke="#ef4444" strokeWidth={2}   dot={{ r: 3, fill: '#ef4444', strokeWidth: 0 }} activeDot={{ r: 5 }} strokeDasharray="5 3" />
-                      <Line type="monotone" dataKey="hold"       name="Hold"        stroke="#f97316" strokeWidth={2}   dot={{ r: 3, fill: '#f97316', strokeWidth: 0 }} activeDot={{ r: 5 }} strokeDasharray="5 3" />
-                    </LineChart>
+                    <PieChart>
+                      <Pie data={metrics.sourceData} cx="50%" cy="50%" innerRadius={70} outerRadius={100} paddingAngle={5} dataKey="value">
+                        {metrics.sourceData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)'}} />
+                      <Legend iconType="circle" wrapperStyle={{fontSize: '12px'}} />
+                    </PieChart>
                   </ResponsiveContainer>
                 </div>
-              )}
+              </div>
             </div>
-          </TabsContent>
-        </Tabs>
+          </>
+        )}
+
+        {/* ── PIPELINE TAB ── */}
+        {activeTab === 'pipeline' && (
+           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 min-h-[500px]">
+             <h3 className="text-lg font-bold text-slate-800 mb-6">Pipeline Trends (Area)</h3>
+             <div className="h-[400px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={metrics.pipelineData}>
+                    <defs>
+                      <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="name" tick={{fontSize: 12, fill: '#64748b'}} axisLine={false} tickLine={false} />
+                    <YAxis tick={{fontSize: 12, fill: '#64748b'}} axisLine={false} tickLine={false} />
+                    <RechartsTooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)'}} />
+                    <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+             </div>
+           </div>
+        )}
+
+        {/* ── DEPARTMENTS TAB ── */}
+        {activeTab === 'departments' && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+               <h3 className="text-lg font-bold text-slate-800">Department / Client Analytics</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-4">Department / Client</th>
+                    <th className="px-6 py-4">Total Candidates</th>
+                    <th className="px-6 py-4">Active Process</th>
+                    <th className="px-6 py-4">Selected/Hired</th>
+                    <th className="px-6 py-4">Conversion Ratio</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {metrics.departmentData.map((d, i) => (
+                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4 font-bold text-slate-800">{d.department}</td>
+                      <td className="px-6 py-4 font-semibold text-slate-600">
+                        <button onClick={() => openCandidateModal(`Candidates for ${d.department}`, d.allCandidates)} className="text-blue-600 hover:underline cursor-pointer focus:outline-none">
+                          {d.total}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 text-amber-600 font-semibold">
+                        <button onClick={() => openCandidateModal(`Active Candidates for ${d.department}`, d.allCandidates.filter(c => { const s = Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status; return !(s?.includes('Select') || s?.includes('Joined') || s?.includes('Reject')); }))} className="hover:underline cursor-pointer focus:outline-none">
+                          {d.active}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 text-emerald-600 font-semibold">
+                        <button onClick={() => openCandidateModal(`Selected/Hired for ${d.department}`, d.allCandidates.filter(c => { const s = Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status; return s?.includes('Select') || s?.includes('Joined'); }))} className="hover:underline cursor-pointer focus:outline-none">
+                          {d.selected}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 text-slate-500">
+                        <div className="flex items-center gap-2">
+                          <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-500 rounded-full" style={{width: `${d.total ? (d.selected/d.total)*100 : 0}%`}} />
+                          </div>
+                          <span className="text-xs font-bold">{d.total ? ((d.selected/d.total)*100).toFixed(0) : 0}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {metrics.departmentData.length === 0 && (
+                    <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400">No department data found for these filters.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ── RECRUITERS TAB ── */}
+        {activeTab === 'recruiters' && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+               <h3 className="text-lg font-bold text-slate-800">Recruiter Performance Matrix</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-4">Recruiter Name</th>
+                    <th className="px-6 py-4">Candidates Managed</th>
+                    <th className="px-6 py-4">Pending Reviews</th>
+                    <th className="px-6 py-4">Successful Hires</th>
+                    <th className="px-6 py-4">Win Rate</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {metrics.recruiterData.sort((a,b) => b.hires - a.hires).map((r, i) => (
+                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4 font-bold text-slate-800 flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center font-bold text-xs">
+                          {r.name.charAt(0).toUpperCase()}
+                        </div>
+                        {r.name}
+                      </td>
+                      <td className="px-6 py-4 font-semibold text-slate-600">
+                        <button onClick={() => openCandidateModal(`Candidates managed by ${r.name}`, r.allCandidates)} className="text-blue-600 hover:underline cursor-pointer focus:outline-none">
+                          {r.managed}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 text-amber-600 font-semibold">
+                        <button onClick={() => openCandidateModal(`Pending Reviews for ${r.name}`, r.allCandidates.filter(c => { const s = Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status; return s?.includes('Submitted') && !s?.includes('Joined'); }))} className="hover:underline cursor-pointer focus:outline-none">
+                          {r.reviews}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 text-emerald-600 font-semibold">
+                        <button onClick={() => openCandidateModal(`Successful Hires by ${r.name}`, r.allCandidates.filter(c => { const s = Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status; return s?.includes('Joined'); }))} className="hover:underline cursor-pointer focus:outline-none">
+                          {r.hires}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 font-bold text-blue-600">{r.conversion}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ── INTERVIEWS TAB ── */}
+        {activeTab === 'interviews' && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+               <h3 className="text-lg font-bold text-slate-800">Interview Tracking</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-4">Interview ID</th>
+                    <th className="px-6 py-4">Date</th>
+                    <th className="px-6 py-4">Candidate</th>
+                    <th className="px-6 py-4">Type</th>
+                    <th className="px-6 py-4">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredData.interviews.sort((a,b) => new Date(b.interviewDate) - new Date(a.interviewDate)).slice(0, 50).map((i) => (
+                    <tr key={i._id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4 font-mono text-xs">
+                        <button onClick={() => { setInterviewModalData(i); setInterviewModalOpen(true); }} className="text-blue-600 hover:underline focus:outline-none cursor-pointer">
+                          {i.interviewId || i._id.slice(-6).toUpperCase()}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 font-semibold text-slate-700">{new Date(i.interviewDate).toLocaleString()}</td>
+                      <td className="px-6 py-4 font-bold">
+                        <button onClick={() => { setInterviewModalData(i); setInterviewModalOpen(true); }} className="text-slate-800 hover:text-blue-600 hover:underline focus:outline-none cursor-pointer">
+                          {typeof i.candidateId === 'object' ? i.candidateId.name || `${i.candidateId.firstName} ${i.candidateId.lastName}`.trim() : 'Unknown'}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 text-slate-500">{i.type || i.round || 'Standard'}</td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                          i.status === 'Completed' ? 'bg-emerald-100 text-emerald-700' :
+                          i.status === 'Cancelled' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                        }`}>
+                          {i.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredData.interviews.length === 0 && (
+                    <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400">No interview data available.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
       </div>
 
-      {/* Today Submissions Modal */}
-      {isModalOpen && (
-        <TodaySubmissionsModal
-          candidates={allCandidates}
-          recruiters={allRecruiters}
-          onClose={() => setIsModalOpen(false)}
-        />
+      {/* ── CANDIDATE MODAL ── */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">{modalTitle}</h2>
+                <p className="text-sm font-semibold text-slate-500 mt-1">Total: {modalCandidates.length} candidate(s)</p>
+              </div>
+              <button onClick={() => setModalOpen(false)} className="text-slate-400 hover:text-red-500 bg-white rounded-full p-2 shadow-sm transition-colors focus:outline-none">
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3">ID</th>
+                    <th className="px-4 py-3">Name</th>
+                    <th className="px-4 py-3">Position</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Date Added</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {modalCandidates.map((c, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 font-mono text-xs text-blue-600">{c.candidateId || c._id?.slice(-6).toUpperCase()}</td>
+                      <td className="px-4 py-3 font-bold text-slate-800">{c.name}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-600">{c.position || '-'}</td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-md text-[10px] font-bold uppercase tracking-wider">
+                          {Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-500">{safeDate(c.dateAdded || c.createdAt)?.toLocaleDateString() || '-'}</td>
+                    </tr>
+                  ))}
+                  {modalCandidates.length === 0 && (
+                    <tr><td colSpan={5} className="px-4 py-12 text-center text-slate-400 font-semibold">No candidates found.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
+
+      {/* ── INTERVIEW DETAILS MODAL ── */}
+      {interviewModalOpen && interviewModalData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">Interview Details</h2>
+                <p className="text-sm font-semibold text-slate-500 mt-1">ID: {interviewModalData.interviewId || interviewModalData._id?.slice(-6).toUpperCase()}</p>
+              </div>
+              <button onClick={() => setInterviewModalOpen(false)} className="text-slate-400 hover:text-red-500 bg-white rounded-full p-2 shadow-sm transition-colors focus:outline-none">
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto space-y-6">
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Candidate Info</h4>
+                  <p className="font-bold text-slate-800 text-lg">{typeof interviewModalData.candidateId === 'object' ? interviewModalData.candidateId.name || `${interviewModalData.candidateId.firstName} ${interviewModalData.candidateId.lastName}`.trim() : 'Unknown'}</p>
+                  <p className="text-sm font-semibold text-slate-600 mt-1">Cand ID: {typeof interviewModalData.candidateId === 'object' ? interviewModalData.candidateId.candidateId || '-' : '-'}</p>
+                </div>
+                <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Recruiter Info</h4>
+                  <p className="font-bold text-slate-800 text-lg">{typeof interviewModalData.recruiterId === 'object' ? (interviewModalData.recruiterId.firstName + ' ' + (interviewModalData.recruiterId.lastName || '')).trim() : 'Unknown'}</p>
+                  <p className="text-sm font-semibold text-slate-600 mt-1">{typeof interviewModalData.recruiterId === 'object' ? interviewModalData.recruiterId.email : ''}</p>
+                </div>
+              </div>
+
+              <div className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 border-b border-slate-50 pb-2">Meeting Details</h4>
+                <div className="grid grid-cols-2 gap-4 text-sm mt-3">
+                  <div><span className="text-slate-500 font-semibold">Date & Time:</span> <span className="font-bold text-slate-800 ml-1">{new Date(interviewModalData.interviewDate).toLocaleString()}</span></div>
+                  <div><span className="text-slate-500 font-semibold">Duration:</span> <span className="font-bold text-slate-800 ml-1">{interviewModalData.duration || 60} mins</span></div>
+                  <div><span className="text-slate-500 font-semibold">Type:</span> <span className="font-bold text-slate-800 ml-1">{interviewModalData.type || 'Virtual'}</span></div>
+                  <div><span className="text-slate-500 font-semibold">Round:</span> <span className="font-bold text-slate-800 ml-1">{interviewModalData.round || 'N/A'}</span></div>
+                  <div className="col-span-2 flex items-center">
+                    <span className="text-slate-500 font-semibold mr-2">Status:</span> 
+                    <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                      interviewModalData.status === 'Completed' ? 'bg-emerald-100 text-emerald-700' :
+                      interviewModalData.status === 'Cancelled' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {interviewModalData.status}
+                    </span>
+                  </div>
+                  {interviewModalData.meetingLink && (
+                    <div className="col-span-2 flex items-start flex-col gap-1 mt-1">
+                      <span className="text-slate-500 font-semibold">Meeting Link:</span> 
+                      <a href={interviewModalData.meetingLink} target="_blank" rel="noreferrer" className="font-bold text-blue-600 hover:underline break-all bg-blue-50 px-3 py-2 rounded-lg inline-block w-full">{interviewModalData.meetingLink}</a>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {(interviewModalData.notes || interviewModalData.feedback) && (
+                <div className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-4">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 border-b border-slate-50 pb-2">Feedback & Notes</h4>
+                  {interviewModalData.notes && (
+                    <div>
+                      <span className="text-slate-500 font-semibold text-xs uppercase block mb-1">Internal Notes:</span> 
+                      <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100">{interviewModalData.notes}</p>
+                    </div>
+                  )}
+                  {interviewModalData.feedback && (
+                    <div>
+                      <span className="text-slate-500 font-semibold text-xs uppercase block mb-1">Interview Feedback:</span> 
+                      <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100">{interviewModalData.feedback}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

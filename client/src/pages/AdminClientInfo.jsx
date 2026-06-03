@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import {
-  Building2, User, X, Eye, Pencil, Plus, CheckCircle, Ban, MapPin, DollarSign, Clock, Trash2
+  Building2, User, X, Eye, Pencil, Plus, CheckCircle, Ban, MapPin, DollarSign, Clock, Trash2,
+  Settings2, Check, GripVertical, Loader2
 } from "lucide-react";
 
 const BASE_URL = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, '');
@@ -11,8 +12,65 @@ const API_URL = `${BASE_URL}/api`;
 // Sleek Grey Input Styling
 const inputCls = "w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-zinc-500 bg-white dark:bg-zinc-900 dark:text-zinc-100 transition-shadow placeholder-zinc-400";
 
+const getCurrentUser = () => {
+  try {
+    const stored = sessionStorage.getItem('currentUser');
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+};
+
+const getTenantClientSettings = () => {
+  const user = getCurrentUser();
+  return user?.clientSettings || { hiddenFields: [], customFields: [] };
+};
+
+const OPTIONAL_STANDARD_FIELDS = [
+  { id: 'phone', label: 'Phone' },
+  { id: 'website', label: 'Website' },
+  { id: 'address', label: 'Address' },
+  { id: 'clientLocation', label: 'Client Location' },
+  { id: 'industry', label: 'Industry' },
+  { id: 'gstNumber', label: 'GST Number' },
+  { id: 'percentage', label: 'Commission Rate' },
+  { id: 'candidatePeriod', label: 'Candidate Period' },
+  { id: 'replacementPeriod', label: 'Replacement Period' },
+  { id: 'lockingPeriod', label: 'Locking Period' },
+  { id: 'paymentMode', label: 'Payment Mode' },
+  { id: 'terms', label: 'Terms & Conditions' }
+];
+
+const CustomFieldInput = ({ cf, value, onChange }) => {
+  if (cf.fieldType === 'boolean') {
+    return (
+      <select
+        value={value || 'false'}
+        onChange={(e) => onChange(cf.fieldName, e.target.value)}
+        className={inputCls}
+      >
+        <option value="false">No</option>
+        <option value="true">Yes</option>
+      </select>
+    );
+  }
+  return (
+    <input
+      type={cf.fieldType === 'date' ? 'date' : cf.fieldType === 'number' ? 'number' : 'text'}
+      value={value || ''}
+      onChange={(e) => onChange(cf.fieldName, e.target.value)}
+      className={inputCls}
+      placeholder={`Enter ${cf.fieldName}...`}
+    />
+  );
+};
+
 /* ---------------- DETAIL MODAL ---------------- */
 const ClientDetailCard = ({ client, onClose }) => {
+  const settings = getTenantClientSettings();
+  const hiddenFields = settings.hiddenFields || [];
+  const isHidden = (fieldId) => hiddenFields.includes(fieldId);
+
   return (
     <div
       className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
@@ -32,8 +90,8 @@ const ClientDetailCard = ({ client, onClose }) => {
                     {client.clientId}
                   </span>
                   {client.companyCode && <span className="bg-blue-900/30 text-blue-300 px-2 py-1 rounded-md border border-blue-800 text-xs font-bold uppercase tracking-wider">{client.companyCode}</span>}
-                  {client.industry && <span>• {client.industry}</span>}
-                  {client.clientLocation && <span>• {client.clientLocation}</span>}
+                  {!isHidden('industry') && client.industry && <span>• {client.industry}</span>}
+                  {!isHidden('clientLocation') && client.clientLocation && <span>• {client.clientLocation}</span>}
                 </div>
               </div>
               <button
@@ -55,10 +113,10 @@ const ClientDetailCard = ({ client, onClose }) => {
                 <div className="space-y-3 text-sm">
                   <p className="flex justify-between"><span className="text-zinc-500">Contact Person:</span> <span className="font-medium">{client.contactPerson || "-"}</span></p>
                   <p className="flex justify-between"><span className="text-zinc-500">Email:</span> <span className="font-medium">{client.email || "-"}</span></p>
-                  <p className="flex justify-between"><span className="text-zinc-500">Phone:</span> <span className="font-medium">{client.phone || "-"}</span></p>
-                  <p className="flex justify-between"><span className="text-zinc-500">Website:</span> <span className="font-medium">{client.website || "-"}</span></p>
-                  <p className="flex justify-between"><span className="text-zinc-500">Location:</span> <span className="font-medium">{client.clientLocation || "-"}</span></p>
-                  <div className="pt-2"><span className="text-zinc-500 block mb-1">Address:</span> <p className="font-medium text-xs leading-relaxed">{client.address || "-"}</p></div>
+                  {!isHidden('phone') && <p className="flex justify-between"><span className="text-zinc-500">Phone:</span> <span className="font-medium">{client.phone || "-"}</span></p>}
+                  {!isHidden('website') && <p className="flex justify-between"><span className="text-zinc-500">Website:</span> <span className="font-medium">{client.website || "-"}</span></p>}
+                  {!isHidden('clientLocation') && <p className="flex justify-between"><span className="text-zinc-500">Location:</span> <span className="font-medium">{client.clientLocation || "-"}</span></p>}
+                  {!isHidden('address') && client.address && <div className="pt-2"><span className="text-zinc-500 block mb-1">Address:</span> <p className="font-medium text-xs leading-relaxed">{client.address || "-"}</p></div>}
                 </div>
               </div>
 
@@ -68,12 +126,12 @@ const ClientDetailCard = ({ client, onClose }) => {
                   <Building2 className="w-5 h-5 text-zinc-500" /> Business Terms
                 </h3>
                 <div className="space-y-3 text-sm">
-                  <p className="flex justify-between"><span className="text-zinc-500">Commission Rate:</span> <span className="font-medium">{client.percentage ? `${client.percentage}%` : "-"}</span></p>
-                  <p className="flex justify-between"><span className="text-zinc-500">Candidate Period:</span> <span className="font-medium">{client.candidatePeriod ? `${client.candidatePeriod} months` : "-"}</span></p>
-                  <p className="flex justify-between"><span className="text-zinc-500">Replacement:</span> <span className="font-medium">{client.replacementPeriod ? `${client.replacementPeriod} days` : "-"}</span></p>
-                  <p className="flex justify-between"><span className="text-zinc-500">Locking Period:</span> <span className="font-medium">{client.lockingPeriod || "-"}</span></p>
-                  <p className="flex justify-between"><span className="text-zinc-500">Payment Mode:</span> <span className="font-medium">{client.paymentMode || "-"}</span></p>
-                  <p className="flex justify-between"><span className="text-zinc-500">GST Number:</span> <span className="font-medium font-mono text-xs">{client.gstNumber || "-"}</span></p>
+                  {!isHidden('percentage') && <p className="flex justify-between"><span className="text-zinc-500">Commission Rate:</span> <span className="font-medium">{client.percentage ? `${client.percentage}%` : "-"}</span></p>}
+                  {!isHidden('candidatePeriod') && <p className="flex justify-between"><span className="text-zinc-500">Candidate Period:</span> <span className="font-medium">{client.candidatePeriod ? `${client.candidatePeriod} months` : "-"}</span></p>}
+                  {!isHidden('replacementPeriod') && <p className="flex justify-between"><span className="text-zinc-500">Replacement:</span> <span className="font-medium">{client.replacementPeriod ? `${client.replacementPeriod} days` : "-"}</span></p>}
+                  {!isHidden('lockingPeriod') && <p className="flex justify-between"><span className="text-zinc-500">Locking Period:</span> <span className="font-medium">{client.lockingPeriod || "-"}</span></p>}
+                  {!isHidden('paymentMode') && <p className="flex justify-between"><span className="text-zinc-500">Payment Mode:</span> <span className="font-medium">{client.paymentMode || "-"}</span></p>}
+                  {!isHidden('gstNumber') && <p className="flex justify-between"><span className="text-zinc-500">GST Number:</span> <span className="font-medium font-mono text-xs">{client.gstNumber || "-"}</span></p>}
                   <p className="flex justify-between"><span className="text-zinc-500">Status:</span>
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${client.active ? 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-200' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>
                       {client.active ? "Active" : "Inactive"}
@@ -83,7 +141,24 @@ const ClientDetailCard = ({ client, onClose }) => {
               </div>
             </div>
 
-            {client.terms && (
+            {/* Custom Fields Card */}
+            {client.customFields && Object.keys(client.customFields).filter(key => !isHidden(key)).length > 0 && (
+              <div className="bg-zinc-50 dark:bg-zinc-800/50 p-5 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                <h3 className="font-semibold text-lg mb-4 text-zinc-900 dark:text-zinc-100 border-b border-zinc-200 dark:border-zinc-700 pb-2">
+                  Additional Details
+                </h3>
+                <div className="grid md:grid-cols-2 gap-4 text-sm">
+                  {Object.entries(client.customFields).filter(([key]) => !isHidden(key)).map(([key, val]) => (
+                    <p key={key} className="flex justify-between border-b border-zinc-100 dark:border-zinc-800/50 pb-2">
+                      <span className="text-zinc-500">{key}:</span>
+                      <span className="font-medium">{val === 'true' ? 'Yes' : val === 'false' ? 'No' : val || '-'}</span>
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!isHidden('terms') && client.terms && (
               <div className="bg-zinc-100 dark:bg-zinc-800 p-5 rounded-xl border border-zinc-200 dark:border-zinc-700">
                 <h4 className="font-semibold mb-2 text-zinc-900 dark:text-zinc-100">Terms & Conditions</h4>
                 <p className="text-sm text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap leading-relaxed">{client.terms}</p>
@@ -99,6 +174,22 @@ const ClientDetailCard = ({ client, onClose }) => {
 export default function AdminClientInfo() {
   const { toast } = useToast();
   const { authHeaders } = useAuth();
+
+  const user = getCurrentUser();
+  const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
+
+  const [tenantSettings, setTenantSettings] = useState(getTenantClientSettings);
+  const hiddenFields = tenantSettings.hiddenFields || [];
+  const tenantCustomFields = tenantSettings.customFields || [];
+  const isHidden = (fieldName) => hiddenFields.includes(fieldName);
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [tempHiddenFields, setTempHiddenFields] = useState([]);
+  const [tempCustomFields, setTempCustomFields] = useState([]);
+  const [newFieldName, setNewFieldName] = useState('');
+  const [newFieldType, setNewFieldType] = useState('text');
+  const [editingFieldIndex, setEditingFieldIndex] = useState(null);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   const getAuthHeader = useCallback(async () => ({
     "Content-Type": "application/json",
@@ -123,6 +214,7 @@ export default function AdminClientInfo() {
     clientId: "", percentage: "", candidatePeriod: "", replacementPeriod: "",
     lockingPeriod: "", paymentMode: "", clientLocation: "", // New Fields
     terms: "", active: true,
+    customFields: {},
   };
   const [form, setForm] = useState(initialFormState);
 
@@ -284,8 +376,96 @@ export default function AdminClientInfo() {
       paymentMode: client.paymentMode || "", // Handle new field
       clientLocation: client.clientLocation || "", // Handle new field
       active: client.active !== false,
+      customFields: client.customFields || {},
     });
     setShowForm(true);
+  };
+
+  const handleCustomFieldChange = (fieldName, value) => {
+    setForm(prev => ({
+      ...prev,
+      customFields: {
+        ...prev.customFields,
+        [fieldName]: value
+      }
+    }));
+  };
+
+  const handleOpenSettings = () => {
+    setTempHiddenFields([...hiddenFields]);
+    setTempCustomFields([...tenantCustomFields]);
+    setEditingFieldIndex(null);
+    setNewFieldName('');
+    setNewFieldType('text');
+    setIsSettingsOpen(true);
+  };
+
+  const handleToggleHiddenField = (fieldId) => {
+    setTempHiddenFields((prev) =>
+      prev.includes(fieldId) ? prev.filter((id) => id !== fieldId) : [...prev, fieldId]
+    );
+  };
+
+  const handleAddOrUpdateCustomField = () => {
+    if (!newFieldName.trim()) return;
+    const name = newFieldName.trim();
+    if (editingFieldIndex !== null) {
+      setTempCustomFields((prev) =>
+        prev.map((cf, idx) => (idx === editingFieldIndex ? { fieldName: name, fieldType: newFieldType } : cf))
+      );
+      setEditingFieldIndex(null);
+    } else {
+      if (tempCustomFields.some((cf) => cf.fieldName.toLowerCase() === name.toLowerCase())) {
+        toast({ title: 'Duplicate Field', description: 'A field with this name already exists.', variant: 'destructive' });
+        return;
+      }
+      setTempCustomFields((prev) => [...prev, { fieldName: name, fieldType: newFieldType }]);
+    }
+    setNewFieldName('');
+    setNewFieldType('text');
+  };
+
+  const handleEditCustomField = (index) => {
+    const cf = tempCustomFields[index];
+    setNewFieldName(cf.fieldName);
+    setNewFieldType(cf.fieldType);
+    setEditingFieldIndex(index);
+  };
+
+  const handleRemoveCustomField = (idx) => {
+    setTempCustomFields((prev) => prev.filter((_, i) => i !== idx));
+    if (editingFieldIndex === idx) {
+      setEditingFieldIndex(null);
+      setNewFieldName('');
+      setNewFieldType('text');
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setIsSavingSettings(true);
+    try {
+      const payload = { clientSettings: { hiddenFields: tempHiddenFields, customFields: tempCustomFields } };
+      const res = await fetch(`${API_URL}/auth/profile`, {
+        method: 'PUT',
+        headers: await getAuthHeader(),
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('Failed to update settings');
+      const updatedUser = await res.json();
+      const stored = sessionStorage.getItem('currentUser');
+      if (stored) {
+        const obj = JSON.parse(stored);
+        obj.clientSettings = updatedUser.clientSettings;
+        sessionStorage.setItem('currentUser', JSON.stringify(obj));
+      }
+      setTenantSettings(updatedUser.clientSettings || payload.clientSettings);
+      setIsSettingsOpen(false);
+      toast({ title: 'Saved!', description: 'Client form settings updated.' });
+    } catch {
+      toast({ title: 'Error', description: 'Failed to save settings.', variant: 'destructive' });
+    } finally {
+      setIsSavingSettings(false);
+    }
   };
 
   const handleToggleActive = async (client) => {
@@ -312,9 +492,7 @@ export default function AdminClientInfo() {
         method: "DELETE",
         headers,
       });
-      
       if (!res.ok) throw new Error();
-
       // Remove from local state
       setClients(prev => prev.filter(c => c.id !== client.id));
       toast({ title: "Success", description: "Client deleted successfully" });
@@ -342,93 +520,212 @@ export default function AdminClientInfo() {
           <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white">Clients</h1>
           <p className="text-zinc-500 dark:text-zinc-400 mt-1">Manage client profiles and business terms</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingClient(null);
-            setShowForm(!showForm);
-            setForm(initialFormState);
-          }}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-zinc-800 dark:hover:bg-zinc-200 shadow-sm"
-        >
-          {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          {showForm ? "Cancel" : "Add Client"}
-        </button>
+        <div className="flex items-center gap-3">
+          {isManagerOrAdmin && (
+            <button
+              onClick={handleOpenSettings}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-lg text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-850 shadow-sm"
+            >
+              <Settings2 className="w-4 h-4 text-zinc-500" />
+              Form Settings
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setEditingClient(null);
+              setShowForm(!showForm);
+              setForm(initialFormState);
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-zinc-800 dark:hover:bg-zinc-200 shadow-sm"
+          >
+            {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+            {showForm ? "Cancel" : "Add Client"}
+          </button>
+        </div>
       </div>
 
       {/* Form Panel */}
       {showForm && (
-        <div
-          className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-6"
-        >
-          <h3 className="font-semibold text-lg mb-6 border-b border-zinc-100 dark:border-zinc-800 pb-3 text-zinc-900 dark:text-white">
-            {editingClient ? "Edit Client Profile" : "Create New Client"}
-          </h3>
-          <div className="grid md:grid-cols-3 gap-5">
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1">Company Name *</label>
-              <input name="companyName" value={form.companyName} onChange={handleChange} className={`${inputCls} ${errors.companyName ? 'border-red-500' : ''}`} />
-              {errors.companyName && <p className="text-xs text-red-500 mt-1">{errors.companyName}</p>}
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1">Contact Person</label>
-              <input name="contactPerson" value={form.contactPerson} onChange={handleChange} className={`${inputCls} ${errors.contactPerson ? 'border-red-500' : ''}`} />
-              {errors.contactPerson && <p className="text-xs text-red-500 mt-1">{errors.contactPerson}</p>}
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1">Email</label>
-              <input name="email" value={form.email} onChange={handleChange} className={`${inputCls} ${errors.email ? 'border-red-500' : ''}`} />
-              {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1">Phone (10 digits)</label>
-              <input name="phone" value={form.phone} onChange={handleChange} className={`${inputCls} ${errors.phone ? 'border-red-500' : ''}`} />
-              {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone}</p>}
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1">Industry</label>
-              <input name="industry" value={form.industry} onChange={handleChange} className={`${inputCls} ${errors.industry ? 'border-red-500' : ''}`} />
-              {errors.industry && <p className="text-xs text-red-500 mt-1">{errors.industry}</p>}
-            </div>
-            
-            {/* --- ADDED NEW FIELDS HERE --- */}
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1">Company Code</label>
-              <input name="companyCode" value={form.companyCode} onChange={handleChange} placeholder="e.g. MSFT, GOOG" className={inputCls} />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1">Client Location</label>
-              <input name="clientLocation" value={form.clientLocation} onChange={handleChange} placeholder="City, State" className={inputCls} />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1">GST Number</label>
-              <input name="gstNumber" value={form.gstNumber} onChange={handleChange} placeholder="e.g. 22AAAAA0000A1Z5" className={`${inputCls} ${errors.gstNumber ? 'border-red-500' : ''}`} />
-              {errors.gstNumber && <p className="text-xs text-red-500 mt-1">{errors.gstNumber}</p>}
-            </div>
-            <div className="md:col-span-3">
-              <label className="block text-xs font-medium text-zinc-500 mb-1">Address</label>
-              <textarea name="address" value={form.address} onChange={handleChange} placeholder="Full address..." rows={2} className={`${inputCls} resize-none`} />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1">Locking Period</label>
-              <input name="lockingPeriod" value={form.lockingPeriod} onChange={handleChange} placeholder="e.g. 30" className={`${inputCls} ${errors.lockingPeriod ? 'border-red-500' : ''}`} />
-              {errors.lockingPeriod && <p className="text-xs text-red-500 mt-1">{errors.lockingPeriod}</p>}
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1">Payment Mode</label>
-              <input name="paymentMode" value={form.paymentMode} onChange={handleChange} placeholder="e.g. Net-30" className={`${inputCls} ${errors.paymentMode ? 'border-red-500' : ''}`} />
-              {errors.paymentMode && <p className="text-xs text-red-500 mt-1">{errors.paymentMode}</p>}
-            </div>
-             {/* ----------------------------- */}
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-md overflow-hidden transition-all">
+          <div className="bg-zinc-50 dark:bg-zinc-900/50 px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+            <h3 className="font-semibold text-lg text-zinc-900 dark:text-white flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-zinc-500" />
+              {editingClient ? "Edit Client Profile" : "Create New Client"}
+            </h3>
+            <button
+              onClick={() => {
+                setShowForm(false);
+                setEditingClient(null);
+                setForm(initialFormState);
+              }}
+              className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-850 rounded-lg text-zinc-400 hover:text-zinc-650 dark:hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1">Commission %</label>
-              <input name="percentage" value={form.percentage} onChange={handleChange} placeholder="e.g. 15" className={`${inputCls} ${errors.percentage ? 'border-red-500' : ''}`} />
-              {errors.percentage && <p className="text-xs text-red-500 mt-1">{errors.percentage}</p>}
+          <div className="p-6 space-y-8">
+            {/* Section 1: Company Profile */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-2 border-l-2 border-zinc-500 pl-2">
+                Company & Contact Information
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {/* Fixed */}
+                <div>
+                  <label className="block text-xs font-medium text-zinc-500 mb-1">Company Name *</label>
+                  <input name="companyName" value={form.companyName} onChange={handleChange} className={`${inputCls} ${errors.companyName ? 'border-red-500' : ''}`} />
+                  {errors.companyName && <p className="text-xs text-red-500 mt-1">{errors.companyName}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-500 mb-1">Company Code</label>
+                  <input name="companyCode" value={form.companyCode} onChange={handleChange} placeholder="e.g. MSFT, GOOG" className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-500 mb-1">Contact Person</label>
+                  <input name="contactPerson" value={form.contactPerson} onChange={handleChange} className={`${inputCls} ${errors.contactPerson ? 'border-red-500' : ''}`} />
+                  {errors.contactPerson && <p className="text-xs text-red-500 mt-1">{errors.contactPerson}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-500 mb-1">Email</label>
+                  <input name="email" value={form.email} onChange={handleChange} className={`${inputCls} ${errors.email ? 'border-red-500' : ''}`} />
+                  {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
+                </div>
+                {/* Optionals */}
+                {!isHidden('phone') && (
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-500 mb-1">Phone</label>
+                    <input name="phone" value={form.phone} onChange={handleChange} placeholder="10-digit mobile number" className={`${inputCls} ${errors.phone ? 'border-red-500' : ''}`} />
+                    {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone}</p>}
+                  </div>
+                )}
+                {!isHidden('website') && (
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-500 mb-1">Website</label>
+                    <input name="website" value={form.website || ""} onChange={handleChange} placeholder="https://..." className={`${inputCls} ${errors.website ? 'border-red-500' : ''}`} />
+                    {errors.website && <p className="text-xs text-red-500 mt-1">{errors.website}</p>}
+                  </div>
+                )}
+                {!isHidden('industry') && (
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-500 mb-1">Industry</label>
+                    <input name="industry" value={form.industry} onChange={handleChange} placeholder="e.g. IT, Healthcare" className={`${inputCls} ${errors.industry ? 'border-red-500' : ''}`} />
+                    {errors.industry && <p className="text-xs text-red-500 mt-1">{errors.industry}</p>}
+                  </div>
+                )}
+                {!isHidden('clientLocation') && (
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-500 mb-1">Client Location</label>
+                    <input name="clientLocation" value={form.clientLocation} onChange={handleChange} placeholder="City, State" className={inputCls} />
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="md:col-span-3 flex justify-end pt-4">
+
+            {/* Section 2: Business & Financial Terms */}
+            {(!isHidden('percentage') || !isHidden('candidatePeriod') || !isHidden('replacementPeriod') || !isHidden('lockingPeriod') || !isHidden('paymentMode') || !isHidden('gstNumber')) && (
+              <div className="space-y-4 pt-6 border-t border-zinc-100 dark:border-zinc-800">
+                <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-2 border-l-2 border-zinc-500 pl-2">
+                  Business & Financial Terms
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  {!isHidden('percentage') && (
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">Commission %</label>
+                      <input name="percentage" value={form.percentage} onChange={handleChange} placeholder="e.g. 15" className={`${inputCls} ${errors.percentage ? 'border-red-500' : ''}`} />
+                      {errors.percentage && <p className="text-xs text-red-500 mt-1">{errors.percentage}</p>}
+                    </div>
+                  )}
+                  {!isHidden('candidatePeriod') && (
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">Candidate Period (months)</label>
+                      <input name="candidatePeriod" value={form.candidatePeriod || ""} onChange={handleChange} placeholder="e.g. 3" className={`${inputCls} ${errors.candidatePeriod ? 'border-red-500' : ''}`} />
+                      {errors.candidatePeriod && <p className="text-xs text-red-500 mt-1">{errors.candidatePeriod}</p>}
+                    </div>
+                  )}
+                  {!isHidden('replacementPeriod') && (
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">Replacement Period (days)</label>
+                      <input name="replacementPeriod" value={form.replacementPeriod || ""} onChange={handleChange} placeholder="e.g. 90" className={`${inputCls} ${errors.replacementPeriod ? 'border-red-500' : ''}`} />
+                      {errors.replacementPeriod && <p className="text-xs text-red-500 mt-1">{errors.replacementPeriod}</p>}
+                    </div>
+                  )}
+                  {!isHidden('lockingPeriod') && (
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">Locking Period (days)</label>
+                      <input name="lockingPeriod" value={form.lockingPeriod} onChange={handleChange} placeholder="e.g. 30" className={`${inputCls} ${errors.lockingPeriod ? 'border-red-500' : ''}`} />
+                      {errors.lockingPeriod && <p className="text-xs text-red-500 mt-1">{errors.lockingPeriod}</p>}
+                    </div>
+                  )}
+                  {!isHidden('paymentMode') && (
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">Payment Mode</label>
+                      <input name="paymentMode" value={form.paymentMode} onChange={handleChange} placeholder="e.g. Net-30" className={`${inputCls} ${errors.paymentMode ? 'border-red-500' : ''}`} />
+                      {errors.paymentMode && <p className="text-xs text-red-500 mt-1">{errors.paymentMode}</p>}
+                    </div>
+                  )}
+                  {!isHidden('gstNumber') && (
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">GST Number</label>
+                      <input name="gstNumber" value={form.gstNumber} onChange={handleChange} placeholder="e.g. 22AAAAA0000A1Z5" className={`${inputCls} ${errors.gstNumber ? 'border-red-500' : ''}`} />
+                      {errors.gstNumber && <p className="text-xs text-red-500 mt-1">{errors.gstNumber}</p>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Section 3: Additional details / address / terms */}
+            {(!isHidden('address') || !isHidden('terms') || tenantCustomFields.length > 0) && (
+              <div className="space-y-4 pt-6 border-t border-zinc-100 dark:border-zinc-800">
+                <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-2 border-l-2 border-zinc-500 pl-2">
+                  Additional Details & Terms
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  {!isHidden('address') && (
+                    <div className="md:col-span-3">
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">Address</label>
+                      <textarea name="address" value={form.address} onChange={handleChange} placeholder="Full address details..." rows={2} className={`${inputCls} resize-none`} />
+                    </div>
+                  )}
+                  {!isHidden('terms') && (
+                    <div className="md:col-span-3">
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">Terms & Conditions</label>
+                      <textarea name="terms" value={form.terms || ""} onChange={handleChange} placeholder="Standard terms, locking notes, etc." rows={2} className={`${inputCls} resize-none`} />
+                    </div>
+                  )}
+
+                  {/* Dynamic Custom Fields */}
+                  {tenantCustomFields.filter(cf => !isHidden(cf.fieldName)).map((cf) => (
+                    <div key={cf.fieldName}>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">{cf.fieldName}</label>
+                      <CustomFieldInput
+                        cf={cf}
+                        value={form.customFields?.[cf.fieldName]}
+                        onChange={handleCustomFieldChange}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Form Actions Footer */}
+            <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-3 bg-zinc-50 dark:bg-zinc-900/50 -mx-6 -mb-6 p-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm(false);
+                  setEditingClient(null);
+                  setForm(initialFormState);
+                }}
+                className="px-4 py-2 border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg text-sm font-medium hover:bg-zinc-150 dark:hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
               <button
                 onClick={handleSubmit}
-                className="px-6 py-2 bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-zinc-800 dark:hover:bg-zinc-200 shadow-sm"
+                className="px-6 py-2 bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-zinc-800 dark:hover:bg-zinc-200 shadow-sm transition-colors"
               >
                 {editingClient ? "Update Client" : "Save Client"}
               </button>
@@ -463,79 +760,89 @@ export default function AdminClientInfo() {
           Loading clients...
         </div>
       ) : (
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left whitespace-nowrap">
-              <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-xs uppercase text-zinc-500 border-b border-zinc-200 dark:border-zinc-800">
-                {/* --- MODIFIED TABLE HEADERS --- */}
+              <thead className="bg-slate-50 dark:bg-zinc-900/50 text-slate-500 border-b border-slate-200 dark:border-zinc-800">
                 <tr>
-                  <th className="px-6 py-4 font-medium tracking-wider">Client</th>
-                  <th className="px-6 py-4 font-medium tracking-wider">Code</th>
-                  <th className="px-6 py-4 font-medium tracking-wider">Contact</th>
-                  <th className="px-6 py-4 font-medium tracking-wider">Email</th>
-                  <th className="px-6 py-4 font-medium tracking-wider">Status</th>
-                  <th className="px-6 py-4 font-medium tracking-wider text-right">Actions</th>
+                  <th className="px-6 py-4 font-semibold text-slate-600">Client</th>
+                  <th className="px-6 py-4 font-semibold text-slate-600">Code</th>
+                  <th className="px-6 py-4 font-semibold text-slate-600">Contact</th>
+                  <th className="px-6 py-4 font-semibold text-slate-600">Email</th>
+                  <th className="px-6 py-4 font-semibold text-slate-600">Status</th>
+                  <th className="px-6 py-4 font-semibold text-slate-600 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
+              <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/50">
                 {filteredClients.length === 0 ? (
                   <tr><td colSpan={5} className="text-center py-12 text-zinc-400">No clients found matching criteria.</td></tr>
                 ) : filteredClients.map((client) => (
-                  <tr key={client.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/20">
+                  <tr key={client.id} className="hover:bg-slate-50/70 dark:hover:bg-zinc-800/20 transition-colors">
+                    {/* Client */}
                     <td className="px-6 py-4">
-                      <div className="font-semibold text-zinc-900 dark:text-zinc-100">{client.companyName}</div>
-                      <div className="text-xs text-zinc-500 font-mono mt-0.5">{client.clientId}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      {client.companyCode ? <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-1 rounded text-xs font-bold font-mono">{client.companyCode}</span> : "-"}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-zinc-800 dark:text-zinc-300">{client.contactPerson || "-"}</div>
-                      <div className="text-xs text-zinc-500 mt-0.5">{client.phone || "-"}</div>
-                    </td>
-                    
-                    {/* --- REPLACED TERMS COLUMN WITH EMAIL --- */}
-                    <td className="px-6 py-4 text-zinc-600 dark:text-zinc-400">
-                      {client.email || "-"}
+                      <div className="font-bold text-slate-900 dark:text-zinc-100 text-sm">{client.companyName}</div>
+                      <div className="text-[11px] text-slate-400 font-mono mt-0.5">{client.clientId || '—'}</div>
                     </td>
 
+                    {/* Code */}
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border ${client.active !== false
-                          ? "bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700"
-                          : "bg-red-50 text-red-600 border-red-100 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900/30"
-                        }`}>
-                        {client.active !== false ? "Active" : "Inactive"}
+                      {client.companyCode
+                        ? <span className="inline-flex items-center px-3 py-1 rounded-md bg-blue-600 text-white text-xs font-bold tracking-wider shadow-sm">{client.companyCode.toUpperCase()}</span>
+                        : <span className="text-slate-300">—</span>}
+                    </td>
+
+                    {/* Contact */}
+                    <td className="px-6 py-4">
+                      <div className="font-semibold text-slate-800 dark:text-zinc-200 text-sm">{client.contactPerson || '—'}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{client.phone || '—'}</div>
+                    </td>
+
+                    {/* Email */}
+                    <td className="px-6 py-4">
+                      <span className="text-slate-700 dark:text-zinc-300 font-medium text-sm">{client.email || '—'}</span>
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center px-3 py-1 rounded-md text-xs font-bold tracking-wide shadow-sm ${
+                        client.active !== false
+                          ? 'bg-green-500 text-white'
+                          : 'bg-red-500 text-white'
+                      }`}>
+                        {client.active !== false ? 'Active' : 'Inactive'}
                       </span>
                     </td>
+
+                    {/* Actions */}
                     <td className="px-6 py-4">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
                           onClick={() => setSelectedClient(client)}
                           title="View Details"
-                          className="p-2 rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                          className="p-2 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600 border border-transparent hover:border-blue-100 transition-all"
                         >
                           <Eye className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleEditClient(client)}
                           title="Edit"
-                          className="p-2 rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                          className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 border border-transparent hover:border-slate-200 transition-all"
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleToggleActive(client)}
-                          title={client.active ? "Deactivate" : "Activate"}
-                          className="p-2 rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                          title={client.active !== false ? 'Deactivate' : 'Activate'}
+                          className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 border border-transparent hover:border-slate-200 transition-all"
                         >
                           {client.active !== false
                             ? <Ban className="w-4 h-4" />
-                            : <CheckCircle className="w-4 h-4" />}
+                            : <CheckCircle className="w-4 h-4 text-green-600" />}
                         </button>
                         <button
                           onClick={() => handleDeleteClient(client)}
                           title="Delete Client"
-                          className="p-2 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                          className="p-2 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600 border border-transparent hover:border-red-100 transition-all"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -551,6 +858,159 @@ export default function AdminClientInfo() {
 
       {/* Render Modal */}
       {selectedClient && <ClientDetailCard client={selectedClient} onClose={() => setSelectedClient(null)} />}
+
+      {/* Settings Modal */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800">
+            <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 flex justify-between items-center shrink-0">
+              <div>
+                <h2 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                  <Settings2 className="w-5 h-5 text-zinc-500" />
+                  Client Form Settings
+                </h2>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Customize visible fields and add custom fields for your clients.</p>
+              </div>
+              <button onClick={() => setIsSettingsOpen(false)} className="text-zinc-400 hover:text-zinc-650 dark:hover:text-white font-bold text-2xl leading-none px-2">×</button>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-6 text-sm text-zinc-800 dark:text-zinc-300">
+              {/* Section 1: Toggle visibility */}
+              <section>
+                <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 mb-1 uppercase tracking-wider">Standard Fields Visibility</h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-4">Uncheck fields you don't need. Fixed fields (Company Name, Contact Person, Email, Company Code) cannot be hidden.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {OPTIONAL_STANDARD_FIELDS.map((field) => {
+                    const isHiddenField = tempHiddenFields.includes(field.id);
+                    return (
+                      <label key={field.id} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors select-none ${!isHiddenField ? 'border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900' : 'border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/40 opacity-60'}`}>
+                        <input type="checkbox" checked={!isHiddenField} onChange={() => handleToggleHiddenField(field.id)} className="w-4 h-4 text-zinc-800 dark:text-zinc-200 rounded border-zinc-300 dark:border-zinc-700 focus:ring-zinc-500 cursor-pointer" />
+                        <span className={`text-sm font-medium ${!isHiddenField ? 'text-zinc-800 dark:text-zinc-200' : 'text-zinc-500 line-through'}`}>{field.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <hr className="border-zinc-200 dark:border-zinc-800" />
+
+              {/* Section 2: Custom Fields */}
+              <section>
+                <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 mb-1 uppercase tracking-wider">Custom Fields</h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-4">Add new fields specific to your client tracking requirements.</p>
+
+                {/* Input Row */}
+                <div className={`flex flex-col sm:flex-row gap-3 items-start sm:items-end p-4 rounded-xl border mb-4 transition-colors ${editingFieldIndex !== null ? 'bg-zinc-100 dark:bg-zinc-800/30 border-zinc-400' : 'bg-zinc-50 dark:bg-zinc-800/20 border-zinc-200 dark:border-zinc-800'}`}>
+                  <div className="flex-1 w-full">
+                    <label className="text-xs font-semibold text-zinc-500 uppercase mb-1 block">Field Name</label>
+                    <input
+                      type="text"
+                      value={newFieldName}
+                      onChange={(e) => setNewFieldName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleAddOrUpdateCustomField(); }}
+                      placeholder="e.g. Agreement Signed?, Account Manager"
+                      className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-zinc-500 outline-none bg-white dark:bg-zinc-900 dark:text-zinc-100 ${editingFieldIndex !== null ? 'border-zinc-400' : 'border-zinc-300 dark:border-zinc-700'}`}
+                    />
+                  </div>
+                  <div className="w-full sm:w-48">
+                    <label className="text-xs font-semibold text-zinc-500 uppercase mb-1 block">Field Type</label>
+                    <select
+                      value={newFieldType}
+                      onChange={(e) => setNewFieldType(e.target.value)}
+                      className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-zinc-500 outline-none bg-white dark:bg-zinc-900 dark:text-zinc-100 ${editingFieldIndex !== null ? 'border-zinc-400' : 'border-zinc-300 dark:border-zinc-700'}`}
+                    >
+                      <option value="text">Text (Short Answer)</option>
+                      <option value="number">Number</option>
+                      <option value="date">Date</option>
+                      <option value="boolean">Yes / No</option>
+                    </select>
+                  </div>
+                  <div className="w-full sm:w-auto sm:self-end flex flex-col gap-1.5">
+                    <button
+                      onClick={handleAddOrUpdateCustomField}
+                      className={`w-full flex items-center justify-center gap-2 text-white bg-zinc-900 dark:bg-white dark:text-zinc-900 px-4 py-2 rounded-lg text-sm font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100 transition`}
+                    >
+                      {editingFieldIndex !== null ? <><Check className="w-4 h-4" /> Update</> : <><Plus className="w-4 h-4" /> Add</>}
+                    </button>
+                    {editingFieldIndex !== null && (
+                      <button onClick={() => { setEditingFieldIndex(null); setNewFieldName(''); setNewFieldType('text'); }} className="text-xs text-center text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 font-medium transition">
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Custom Fields List */}
+                {tempCustomFields.length === 0 ? (
+                  <div className="text-center py-8 text-zinc-400 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50/50 dark:bg-zinc-900/10 text-sm">
+                    No custom fields added yet. Use the form above to add your first one.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {tempCustomFields.map((field, index) => {
+                      const isHiddenField = tempHiddenFields.includes(field.fieldName);
+                      const isEditing = editingFieldIndex === index;
+                      return (
+                        <div
+                          key={index}
+                          className={`flex items-center justify-between p-3 rounded-lg border transition-colors select-none ${
+                            isEditing 
+                              ? 'border-zinc-500 bg-zinc-100 dark:bg-zinc-800' 
+                              : !isHiddenField 
+                                ? 'border-zinc-350 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900' 
+                                : 'border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/40 opacity-60'
+                          }`}
+                        >
+                          <label className="flex items-center gap-3 cursor-pointer flex-1 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={!isHiddenField}
+                              onChange={() => handleToggleHiddenField(field.fieldName)}
+                              className="w-4 h-4 text-zinc-800 dark:text-zinc-200 rounded border-zinc-300 dark:border-zinc-700 focus:ring-zinc-500 cursor-pointer"
+                            />
+                            <div className="min-w-0">
+                              <span className={`text-sm font-medium block truncate ${!isHiddenField ? 'text-zinc-850 dark:text-zinc-200' : 'text-zinc-500 line-through'}`}>
+                                {field.fieldName}
+                              </span>
+                              <span className="text-[10px] text-zinc-400 font-mono uppercase tracking-wider block">
+                                {field.fieldType}
+                              </span>
+                            </div>
+                          </label>
+                          <div className="flex gap-0.5 ml-2">
+                            <button
+                              onClick={() => handleEditCustomField(index)}
+                              className="p-1 text-zinc-450 hover:text-zinc-900 dark:hover:text-white rounded transition"
+                              title="Edit"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleRemoveCustomField(index)}
+                              className="p-1 text-zinc-450 hover:text-red-500 rounded transition"
+                              title="Remove"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </div>
+
+            <div className="p-5 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 flex justify-end gap-3 shrink-0">
+              <button onClick={() => setIsSettingsOpen(false)} className="px-5 py-2.5 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">Cancel</button>
+              <button onClick={handleSaveSettings} disabled={isSavingSettings} className="flex items-center gap-2 px-5 py-2.5 bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100 transition disabled:opacity-50">
+                {isSavingSettings && <Loader2 className="h-4 w-4 animate-spin" />}
+                {isSavingSettings ? 'Saving...' : 'Save Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

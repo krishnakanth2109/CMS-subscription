@@ -265,3 +265,21 @@ export function useAuth() {
   if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 }
+
+export const getDisplayRole = (internalRole) => {
+  if (!internalRole) return '';
+  const normalizedRole = internalRole.toLowerCase();
+  
+  switch (normalizedRole) {
+    case 'manager':
+      return 'Admin';
+    case 'admin':
+      return 'Manager';
+    case 'master':
+      return 'Master Admin';
+    case 'recruiter':
+      return 'Recruiter';
+    default:
+      return internalRole.charAt(0).toUpperCase() + internalRole.slice(1);
+  }
+};

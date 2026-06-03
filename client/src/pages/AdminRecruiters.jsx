@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   AlertTriangle, UserPlus, Search, Mail, Phone, TrendingUp,
   Download, Grid3X3, List, Edit, Trash2, UserX, UserCheck,
-  Camera, Briefcase, MoreVertical, Users, Eye, EyeOff, ArrowUpDown, ShieldAlert
+  Camera, Briefcase, MoreVertical, Users, Eye, EyeOff, ArrowUpDown, ShieldAlert, X
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -20,7 +21,7 @@ import { toast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth, getDisplayRole } from "@/context/AuthContext";
 
 // ── ENV ───────────────────────────────────────────────────────────────────────
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
@@ -372,6 +373,7 @@ export default function AdminRecruiters() {
         case 'email': av = a.email; bv = b.email; break;
         case 'id': av = a.recruiterId || ''; bv = b.recruiterId || ''; break;
         case 'total': av = sa.total; bv = sb.total; break;
+        case 'turnups': av = sa.turnups; bv = sb.turnups; break;
         case 'joined': av = sa.joined; bv = sb.joined; break;
         case 'selected': av = sa.selected; bv = sb.selected; break;
         default: break;
@@ -388,9 +390,37 @@ export default function AdminRecruiters() {
     });
     if (candidateFilterType === 'joined') list = list.filter((c) => (Array.isArray(c.status) ? c.status : [c.status]).includes('Joined'));
     if (candidateFilterType === 'selected') list = list.filter((c) => (Array.isArray(c.status) ? c.status : [c.status]).includes('Selected'));
+    if (candidateFilterType === 'turnups') list = list.filter((c) => (Array.isArray(c.status) ? c.status : [c.status]).includes('Turnups'));
     if (candidateFilterType === 'rejected') list = list.filter((c) => (Array.isArray(c.status) ? c.status : [c.status]).includes('Rejected'));
     return list;
   }, [candidates, selectedRecruiter, candidateFilterType]);
+
+  const downloadCandidatesExcel = () => {
+    if (!filteredCandidatesForModal.length) return;
+    try {
+      const rows = filteredCandidatesForModal.map((c) => ({
+        'Name': c.name || '',
+        'Email': c.email || '',
+        'Contact': c.contact || '',
+        'Position': c.position || '',
+        'Client': c.client || '',
+        'Experience': c.totalExperience || '',
+        'Status': Array.isArray(c.status) ? c.status.join(', ') : (c.status || ''),
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = Object.keys(rows[0] || {}).map(key => ({
+        wch: Math.max(key.length, ...rows.map(r => String(r[key] || '').length), 10)
+      }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Candidates');
+      const recName = selectedRecruiter ? `${selectedRecruiter.firstName}_${selectedRecruiter.lastName}` : 'Recruiter';
+      XLSX.writeFile(wb, `${recName}_${candidateFilterType}_candidates.xlsx`);
+      toast({ title: 'Exported!', description: `${rows.length} candidates exported to Excel successfully.` });
+    } catch (err) {
+      toast({ title: 'Export failed', description: err.message, variant: 'destructive' });
+    }
+  };
 
   // ── Summary stats ─────────────────────────────────────────────────────────
   const isActive = (r) => r.active !== false && r.active !== 'false';
@@ -647,7 +677,9 @@ export default function AdminRecruiters() {
                           {r.phone && <div className="flex items-center gap-2"><Phone className="h-4 w-4 flex-shrink-0 text-slate-400" /> {r.phone}</div>}
                           <div className="flex items-center gap-2 capitalize">
                             <Briefcase className="h-4 w-4 flex-shrink-0 text-slate-400" />
-                            {isAdmin ? <span className="text-purple-600 font-medium">Admin</span> : (r.role || 'Recruiter')}
+                            <span className={isAdmin ? 'text-purple-600 font-medium' : 'text-slate-600'}>
+                              {getDisplayRole(r.role) || 'Recruiter'}
+                            </span>
                           </div>
                         </div>
 
@@ -697,7 +729,9 @@ export default function AdminRecruiters() {
                         <th className="px-4 py-3 text-center cursor-pointer" onClick={() => toggleSort('total')}>
                           <span className="flex items-center justify-center">Total <SortIcon field="total" /></span>
                         </th>
-                        <th className="px-4 py-3 text-center">Turnups</th>
+                        <th className="px-4 py-3 text-center cursor-pointer" onClick={() => toggleSort('turnups')}>
+                          <span className="flex items-center justify-center">Turnups <SortIcon field="turnups" /></span>
+                        </th>
                         <th className="px-4 py-3 text-center cursor-pointer" onClick={() => toggleSort('selected')}>
                           <span className="flex items-center justify-center">Selected <SortIcon field="selected" /></span>
                         </th>
@@ -734,7 +768,7 @@ export default function AdminRecruiters() {
                             <td className="px-4 py-3 text-slate-600">{r.recruiterId || '-'}</td>
                             <td className="px-4 py-3 capitalize">
                               <span className={isAdmin ? 'text-purple-600 font-medium' : 'text-slate-600'}>
-                                {r.role}
+                                {getDisplayRole(r.role)}
                               </span>
                             </td>
                             <td className="px-4 py-3"><StatusBadge recruiter={r} /></td>
@@ -742,7 +776,10 @@ export default function AdminRecruiters() {
                               onClick={() => { setSelectedRecruiter(r); setCandidatesModalTitle(`All — ${r.firstName} ${r.lastName}`); setCandidateFilterType(null); setShowCandidatesModal(true); }}>
                               {st.total}
                             </td>
-                            <td className="px-4 py-3 text-center font-bold text-teal-600">{st.turnups}</td>
+                            <td className="px-4 py-3 text-center font-bold text-teal-600 cursor-pointer hover:underline"
+                              onClick={() => { setSelectedRecruiter(r); setCandidatesModalTitle(`Turnups — ${r.firstName} ${r.lastName}`); setCandidateFilterType('turnups'); setShowCandidatesModal(true); }}>
+                              {st.turnups}
+                            </td>
                             <td className="px-4 py-3 text-center font-bold text-purple-600 cursor-pointer hover:underline"
                               onClick={() => { setSelectedRecruiter(r); setCandidatesModalTitle(`Selected — ${r.firstName} ${r.lastName}`); setCandidateFilterType('selected'); setShowCandidatesModal(true); }}>
                               {st.selected}
@@ -828,7 +865,7 @@ export default function AdminRecruiters() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="recruiter">Recruiter</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="admin">Manager</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -938,7 +975,7 @@ export default function AdminRecruiters() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="recruiter">Recruiter</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="admin">Manager</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1189,7 +1226,7 @@ export default function AdminRecruiters() {
                           {r.firstName} {r.lastName}
                           {r.role === 'admin' && <ShieldAlert className="h-3 w-3 text-purple-600" />}
                         </div>
-                        <div className="text-xs text-gray-500 capitalize">{r.role} • {r.email}</div>
+                        <div className="text-xs text-gray-500 capitalize">{getDisplayRole(r.role)} • {r.email}</div>
                       </div>
                     </div>
                     <StatusBadge recruiter={r} />
@@ -1210,17 +1247,38 @@ export default function AdminRecruiters() {
         <Dialog open={showCandidatesModal} onClose={() => setShowCandidatesModal(false)} className="relative z-50">
           <DialogBackdrop className="fixed inset-0 bg-black/50" />
           <div className="fixed inset-0 flex items-center justify-center p-4">
-            <DialogPanel className="bg-white w-full max-w-4xl rounded-xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
-              <DialogTitle className="text-xl font-bold mb-4">{candidatesModalTitle}</DialogTitle>
+            <DialogPanel className="bg-white w-full max-w-full rounded-xl shadow-2xl p-6 pt-0 max-h-[90vh] overflow-y-auto relative">
+
+              <div className="flex justify-between items-center sticky top-0 bg-white z-10 py-4 border-b border-gray-100">
+                <DialogTitle className="text-xl font-bold">{candidatesModalTitle}</DialogTitle>
+                <div className="flex items-center gap-3">
+                  {filteredCandidatesForModal.length > 0 && (
+                    <button
+                      onClick={downloadCandidatesExcel}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-lg text-xs font-semibold transition"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Export Excel
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowCandidatesModal(false)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors p-1.5 hover:bg-gray-55 rounded-lg"
+                    aria-label="Close"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
                   <thead className="bg-gray-50 dark:bg-gray-800 text-xs uppercase text-gray-500">
                     <tr>
                       <th className="p-3">Name</th>
                       <th className="p-3">Role / Client</th>
-                      <th className="p-3">Status</th>
+                      <th className="p-3">Experience</th>
                       <th className="p-3">Email</th>
-                      <th className="p-3">Phone</th>
+                      <th className="p-3">Contact</th>
+                      <th className="p-3">Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1232,6 +1290,9 @@ export default function AdminRecruiters() {
                             <div>{c.position}</div>
                             <div className="text-xs text-gray-400">{c.client}</div>
                           </td>
+                          <td className="p-3 text-gray-500">{c.totalExperience || '-'}</td>
+                          <td className="p-3 text-gray-500">{c.email}</td>
+                          <td className="p-3 text-gray-500">{c.contact}</td>
                           <td className="p-3">
                             <div className="flex flex-wrap gap-1">
                               {(Array.isArray(c.status) ? c.status : [c.status || '']).map((s) => (
@@ -1239,13 +1300,11 @@ export default function AdminRecruiters() {
                               ))}
                             </div>
                           </td>
-                          <td className="p-3 text-gray-500">{c.email}</td>
-                          <td className="p-3 text-gray-500">{c.contact}</td>
                         </tr>
                       ))
                       : (
                         <tr>
-                          <td colSpan={5} className="p-6 text-center text-gray-400">
+                          <td colSpan={6} className="p-6 text-center text-gray-400">
                             No candidates found.
                           </td>
                         </tr>
@@ -1254,9 +1313,9 @@ export default function AdminRecruiters() {
                   </tbody>
                 </table>
               </div>
-              <div className="flex justify-end mt-4">
+              {/* <div className="flex justify-end mt-4">
                 <Button onClick={() => setShowCandidatesModal(false)}>Close</Button>
-              </div>
+              </div> */}
             </DialogPanel>
           </div>
         </Dialog>

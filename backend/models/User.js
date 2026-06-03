@@ -65,6 +65,28 @@ const userSchema = new mongoose.Schema(
       }]
     },
 
+    // ── Tenant Client Field Preferences ───────────────────────────────────────
+    clientSettings: {
+      // Standard fields the tenant wishes to hide/remove
+      hiddenFields: { type: [String], default: [] },
+      // Custom fields the tenant hasnfu added
+      customFields: [{
+        fieldName: { type: String, required: true },
+        fieldType: { type: String, enum: ['text', 'number', 'date', 'boolean'], default: 'text' }
+      }]
+    },
+
+    // ── Tenant Requirement Field Preferences ──────────────────────────────────
+    requirementSettings: {
+      // Standard fields the tenant wishes to hide/remove
+      hiddenFields: { type: [String], default: [] },
+      // Custom fields the tenant has added
+      customFields: [{
+        fieldName: { type: String, required: true },
+        fieldType: { type: String, enum: ['text', 'number', 'date', 'boolean'], default: 'text' }
+      }]
+    },
+
     active:         { type: Boolean, default: true },
     location:       { type: String },
     specialization: { type: String },

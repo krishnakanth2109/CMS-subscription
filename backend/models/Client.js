@@ -33,6 +33,7 @@ const clientSchema = mongoose.Schema({
   paymentMode: { type: String },
   terms: { type: String },
   active: { type: Boolean, default: true },
+  customFields: { type: mongoose.Schema.Types.Mixed, default: {} },
 }, {
   timestamps: true,
 });

@@ -230,7 +230,7 @@ const AdminClientInvoice = () => {
 
       const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-      
+
       const drawText = (text, x, y, size = 9.5, isBold = false) => {
         if (!text || text === "undefined") return;
         firstPage.drawText(String(text).trim(), {
@@ -253,7 +253,7 @@ const AdminClientInvoice = () => {
           w = font.widthOfTextAtSize(t, sz);
         }
         const x = centerX - (w / 2);
-        
+
         firstPage.drawText(t, {
           x,
           y: height - y - (sz / 3),
@@ -351,14 +351,14 @@ const AdminClientInvoice = () => {
       // -- TAX INVOICE Title --
       drawTextCentered("TAX INVOICE", width / 2, Math.max(320, afterAddressY + 40), 200, true, 14);
 
-      const cands = form.selectedCandidates.length > 0 ? form.selectedCandidates : (form.candidateName ? [{name: form.candidateName, role: form.role, joiningDate: form.joiningDate, actualSalary: form.actualSalary, percentage: form.percentage, payment: form.payment}] : []);
-      
+      const cands = form.selectedCandidates.length > 0 ? form.selectedCandidates : (form.candidateName ? [{ name: form.candidateName, role: form.role, joiningDate: form.joiningDate, actualSalary: form.actualSalary, percentage: form.percentage, payment: form.payment }] : []);
+
       // -- Dynamic Layout Tuning for Large Lists --
       const candidateCount = cands.length;
       const isLargeList = candidateCount > 5;
-      
-      let rowHR = 18; 
-      let rowDR = isLargeList ? 15 : 18; 
+
+      let rowHR = 18;
+      let rowDR = isLargeList ? 15 : 18;
       let currentY = isLargeList ? 342 : 345;
       const headerFs = 8.5;
       const dataFs = isLargeList ? 7.5 : 8;
@@ -372,40 +372,40 @@ const AdminClientInvoice = () => {
 
       const drawCell = (text, x, w, y, h, align = 'center', isBold = false, fs = dataFs) => {
         firstPage.drawRectangle({
-          x, y: height - (y + h/2), width: w, height: h,
-          borderColor: rgb(0,0,0), borderWidth: 0.7
+          x, y: height - (y + h / 2), width: w, height: h,
+          borderColor: rgb(0, 0, 0), borderWidth: 0.7
         });
         if (text) {
-          if (align === 'center') drawTextCentered(text, x + w/2, y, w-4, isBold, fs);
+          if (align === 'center') drawTextCentered(text, x + w / 2, y, w - 4, isBold, fs);
           else if (align === 'left') drawText(text, x + 4, y, fs, isBold);
-          else drawTextCentered(text, x + w/2, y, w-4, isBold, fs);
+          else drawTextCentered(text, x + w / 2, y, w - 4, isBold, fs);
         }
       };
 
       headers.forEach((h, i) => {
         drawCell(h, colStarts[i], colWidths[i], currentY, rowHR, 'center', true, headerFs);
       });
-      currentY += (rowHR/2 + rowDR/2);
+      currentY += (rowHR / 2 + rowDR / 2);
 
       let totalPay = 0;
       cands.forEach((c, i) => {
         totalPay += (parseFloat(c.payment) || 0);
-        drawCell(String(i+1), colStarts[0], colWidths[0], currentY, rowDR);
-        
+        drawCell(String(i + 1), colStarts[0], colWidths[0], currentY, rowDR);
+
         const nameText = String(c.name || "");
         firstPage.drawRectangle({
-          x: colStarts[1], y: height - (currentY + rowDR/2), width: colWidths[1], height: rowDR,
-          borderColor: rgb(0,0,0), borderWidth: 0.7
+          x: colStarts[1], y: height - (currentY + rowDR / 2), width: colWidths[1], height: rowDR,
+          borderColor: rgb(0, 0, 0), borderWidth: 0.7
         });
 
         if (nameText.length > 18) {
-           const splitIdx = nameText.lastIndexOf(" ", 18) || 18;
-           const line1 = nameText.substring(0, splitIdx).trim();
-           const line2 = nameText.substring(splitIdx).trim();
-           drawTextCentered(line1, colCenters[1], currentY - 4, colWidths[1]-4, false, dataFs - 1);
-           drawTextCentered(line2, colCenters[1], currentY + 4, colWidths[1]-4, false, dataFs - 1);
+          const splitIdx = nameText.lastIndexOf(" ", 18) || 18;
+          const line1 = nameText.substring(0, splitIdx).trim();
+          const line2 = nameText.substring(splitIdx).trim();
+          drawTextCentered(line1, colCenters[1], currentY - 4, colWidths[1] - 4, false, dataFs - 1);
+          drawTextCentered(line2, colCenters[1], currentY + 4, colWidths[1] - 4, false, dataFs - 1);
         } else {
-           drawTextCentered(nameText, colCenters[1], currentY, colWidths[1]-4, false, dataFs);
+          drawTextCentered(nameText, colCenters[1], currentY, colWidths[1] - 4, false, dataFs);
         }
 
         drawCell(c.role || "", colStarts[2], colWidths[2], currentY, rowDR);
@@ -421,26 +421,26 @@ const AdminClientInvoice = () => {
       const grandTotalAmt = totalPay + totalCgstAmt + totalSgstAmt;
 
       const tH = isLargeList ? 16 : 18;
-      
+
       const drawSummaryRow = (label, amount, yOffset, isBold = true) => {
         const y = currentY + yOffset;
         firstPage.drawRectangle({
-          x: colStarts[0], y: height - (y + tH/2), width: colStarts[6] - colStarts[0], height: tH,
-          borderColor: rgb(0,0,0), borderWidth: 0.7
+          x: colStarts[0], y: height - (y + tH / 2), width: colStarts[6] - colStarts[0], height: tH,
+          borderColor: rgb(0, 0, 0), borderWidth: 0.7
         });
         firstPage.drawRectangle({
-          x: colStarts[6], y: height - (y + tH/2), width: colWidths[6], height: tH,
-          borderColor: rgb(0,0,0), borderWidth: 0.7
+          x: colStarts[6], y: height - (y + tH / 2), width: colWidths[6], height: tH,
+          borderColor: rgb(0, 0, 0), borderWidth: 0.7
         });
         const w = (isBold ? helveticaBold : helvetica).widthOfTextAtSize(label, 10);
-        firstPage.drawText(label, { 
-            x: colStarts[6] - 15 - w, 
-            y: height - y - 3.33, 
-            size: 10, 
-            font: isBold ? helveticaBold : helvetica, 
-            color: rgb(0,0,0) 
+        firstPage.drawText(label, {
+          x: colStarts[6] - 15 - w,
+          y: height - y - 3.33,
+          size: 10,
+          font: isBold ? helveticaBold : helvetica,
+          color: rgb(0, 0, 0)
         });
-        drawTextCentered(amount.toLocaleString("en-IN"), colCenters[6], y, colWidths[6]-4, isBold, 10);
+        drawTextCentered(amount.toLocaleString("en-IN"), colCenters[6], y, colWidths[6] - 4, isBold, 10);
       };
 
       drawSummaryRow(`CGST (${form.cgstPercentage || 0}%)`, totalCgstAmt, 0, false);
@@ -532,19 +532,19 @@ const AdminClientInvoice = () => {
     ];
 
     let totalPay = 0;
-    const cands = form.selectedCandidates.length > 0 ? form.selectedCandidates : (form.candidateName ? [{name: form.candidateName, role: form.role, joiningDate: form.joiningDate, actualSalary: form.actualSalary, percentage: form.percentage, payment: form.payment}] : []);
-    
+    const cands = form.selectedCandidates.length > 0 ? form.selectedCandidates : (form.candidateName ? [{ name: form.candidateName, role: form.role, joiningDate: form.joiningDate, actualSalary: form.actualSalary, percentage: form.percentage, payment: form.payment }] : []);
+
     cands.forEach((c, i) => {
-        totalPay += parseFloat(c.payment) || 0;
-        wsData.push([
-           i + 1,
-           c.name,
-           c.role,
-           getOrdinalDate(c.joiningDate),
-           c.actualSalary,
-           `${c.percentage || 0}%`,
-           c.payment
-        ]);
+      totalPay += parseFloat(c.payment) || 0;
+      wsData.push([
+        i + 1,
+        c.name,
+        c.role,
+        getOrdinalDate(c.joiningDate),
+        c.actualSalary,
+        `${c.percentage || 0}%`,
+        c.payment
+      ]);
     });
 
     const totalCgstAmt = Math.round((totalPay * parseFloat(form.cgstPercentage || 0)) / 100);
@@ -929,7 +929,7 @@ const AdminClientInvoice = () => {
   };
 
   return (
-    <div className="flex-1 p-8 h-full">
+    <div className="flex flex-col p-8 h-full">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Invoice Generator</h1>
         <button
@@ -942,7 +942,7 @@ const AdminClientInvoice = () => {
       </div>
 
       {!showPreview ? (
-        <div className="max-w-5xl">
+        <div className="w-full">
           {/* Invoice & Client Details */}
           <SectionCard title="Client Info" icon={BuildingOfficeIcon}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1107,23 +1107,23 @@ const AdminClientInvoice = () => {
                 <div className="col-span-1 md:col-span-2 lg:col-span-3 mt-4 overflow-hidden border border-blue-100 rounded-xl bg-blue-50/30 animate-in fade-in slide-in-from-top-2 duration-300">
                   <div className="bg-blue-600 px-4 py-2 flex justify-between items-center text-white">
                     <h3 className="text-sm font-semibold flex items-center gap-2">
-                       Candidate List ({form.selectedCandidates.length} Selected)
+                      Candidate List ({form.selectedCandidates.length} Selected)
                     </h3>
                     <div className="flex items-center gap-2">
-                      <button 
-                        onClick={() => setForm(prev => ({...prev, selectedCandidates: []}))}
+                      <button
+                        onClick={() => setForm(prev => ({ ...prev, selectedCandidates: [] }))}
                         className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded transition"
                       >
                         Clear All
                       </button>
-                      <button 
+                      <button
                         onClick={() => setShowCandidateList(false)}
                         className="text-white hover:text-blue-100 p-1"
                         title="Close List"
                       >
-                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="6 18L18 6M6 6l12 12" />
-                         </svg>
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="6 18L18 6M6 6l12 12" />
+                        </svg>
                       </button>
                     </div>
                   </div>
@@ -1146,7 +1146,7 @@ const AdminClientInvoice = () => {
                             <td className="px-4 py-2 text-gray-600">{c.role}</td>
                             <td className="px-4 py-2 text-right font-bold text-blue-700">₹{c.payment.toLocaleString('en-IN')}</td>
                             <td className="px-4 py-2 text-center">
-                              <button 
+                              <button
                                 onClick={() => removeCandidateFromList(c.id)}
                                 className="text-red-500 hover:text-red-700 text-xs font-medium underline px-2 py-1"
                               >
@@ -1263,13 +1263,13 @@ const AdminClientInvoice = () => {
 
           <div className="flex justify-end items-center gap-3">
             <select
-                value={downloadFormat}
-                onChange={(e) => setDownloadFormat(e.target.value)}
-                className="px-4 py-3 border border-gray-300 rounded-lg font-medium outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              value={downloadFormat}
+              onChange={(e) => setDownloadFormat(e.target.value)}
+              className="px-4 py-3 border border-gray-300 rounded-lg font-medium outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
-                <option value="pdf">PDF Format (.pdf)</option>
-                <option value="word">Word Format (.doc)</option>
-                <option value="excel">Excel Format (.xlsx)</option>
+              <option value="pdf">PDF Format (.pdf)</option>
+              <option value="word">Word Format (.doc)</option>
+              <option value="excel">Excel Format (.xlsx)</option>
             </select>
             <button
               className="px-6 py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition shadow-md text-lg disabled:opacity-50"
@@ -1297,13 +1297,13 @@ const AdminClientInvoice = () => {
           )}
           <div className="p-4 bg-white border-t flex justify-end gap-3 items-center">
             <select
-                value={downloadFormat}
-                onChange={(e) => setDownloadFormat(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded font-medium"
+              value={downloadFormat}
+              onChange={(e) => setDownloadFormat(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded font-medium"
             >
-                <option value="pdf">PDF (.pdf)</option>
-                <option value="word">Word (.doc)</option>
-                <option value="excel">Excel (.xlsx)</option>
+              <option value="pdf">PDF (.pdf)</option>
+              <option value="word">Word (.doc)</option>
+              <option value="excel">Excel (.xlsx)</option>
             </select>
             <button
               className="px-6 py-2 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition"

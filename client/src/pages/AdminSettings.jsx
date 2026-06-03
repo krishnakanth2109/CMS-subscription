@@ -4,26 +4,30 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  Lock, User, Mail, Loader2,
-  CheckCircle2, Hash, AlertCircle, Info,
+  User, Mail, Loader2,
+  Hash, AlertCircle, Info, Crown
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
+import UpgradePlanModal from '@/components/UpgradePlanModal';
 
 // ── ENV ───────────────────────────────────────────────────────────────────────
 // VITE_API_URL="http://localhost:5000"  (no trailing /api in .env)
 // We always append /api here so every fetch hits the correct endpoint.
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
 const API_URL  = `${BASE_URL}/api`;
-
-const STEPS = { REQUEST: 'request', SENT: 'sent' };
-
 export default function AdminSettings() {
   const { toast }       = useToast();
-  const { authHeaders, userRole } = useAuth();
+  const { authHeaders, userRole, currentUser } = useAuth();
 
   const [loading,   setLoading]   = useState(true);
   const [saving,    setSaving]    = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+  const currentPlan = currentUser?.subscriptionPlan || 'Basic';
+  const daysLeft = currentUser?.subscriptionDaysLeft ?? null;
+  const isExpired = daysLeft !== null && daysLeft === 0;
+  const showBanner = isExpired || (currentPlan === 'Basic' && daysLeft !== null && daysLeft <= 7);
 
   // Profile form
   const [formData, setFormData] = useState({ name: '', email: '', username: '' });
@@ -33,10 +37,6 @@ export default function AdminSettings() {
   const [prefixInput,  setPrefixInput]  = useState('CAND');
   const [prefixSaving, setPrefixSaving] = useState(false);
   const [prefixError,  setPrefixError]  = useState('');
-
-  // Password Link flow
-  const [step,      setStep]      = useState(STEPS.REQUEST);
-  const [sending,   setSending]   = useState(false);
 
   // ── Auth header builder ───────────────────────────────────────────────────
   // Uses AuthContext.authHeaders() which auto-refreshes the Firebase token
@@ -128,42 +128,7 @@ export default function AdminSettings() {
     }
   };
 
-  // ── Send Reset Link ──────────────────────────────────────────────────────
-  const handleSendLink = async () => {
-    const email = getUserEmail();
-    if (!email) {
-      toast({ title: 'Error', description: 'Session not found. Please log in again.', variant: 'destructive' });
-      return;
-    }
-    setSending(true);
-    try {
-      const headers = await buildHeaders();
-      const res = await fetch(`${API_URL}/auth/send-otp`, {
-        method: 'POST', headers, body: JSON.stringify({ email }),
-      });
-      const data = await res.json();
-      
-      if (!res.ok) throw new Error(data.message || 'Failed to send reset link.');
 
-      toast({
-        title: 'Email Sent!',
-        description: `A reset link has been sent to ${email}.`,
-      });
-      
-      setStep(STEPS.SENT);
-    } catch (err) {
-      toast({ title: 'Send Failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const resetFlow = () => {
-    setStep(STEPS.REQUEST);
-  };
-
-  const stepIdx  = [STEPS.REQUEST, STEPS.SENT].indexOf(step);
-  const stepMeta = ['Request Link', 'Link Sent'];
 
   if (loading) {
     return (
@@ -178,7 +143,7 @@ export default function AdminSettings() {
       <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
 
         <div>
-          <h1 className="text-4xl font-bold text-gray-900">Settings</h1>
+          <h1 className="text-4xl font-bold text-gray-900">My Profile</h1>
           <p className="text-gray-500 mt-2">Manage your account and preferences</p>
         </div>
 
@@ -221,85 +186,7 @@ export default function AdminSettings() {
           </CardContent>
         </Card>
 
-        {/* ── Password Reset Card ── */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Lock className="h-5 w-5 text-indigo-600" />
-              <CardTitle>Change Password</CardTitle>
-            </div>
-            <CardDescription>Request a secure password reset link to be sent to your registered email address.</CardDescription>
-          </CardHeader>
-          <CardContent>
 
-            {/* Step indicator */}
-            <div className="flex items-center gap-2 mb-6">
-              {stepMeta.map((label, i) => {
-                const done   = i < stepIdx || step === STEPS.SENT;
-                const active = i === stepIdx;
-                return (
-                  <React.Fragment key={label}>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                        done   ? 'bg-green-500 text-white'
-                               : active ? 'bg-indigo-600 text-white'
-                               : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : i + 1}
-                      </div>
-                      <span className={`text-xs font-medium hidden sm:block ${active || done ? 'text-gray-900' : 'text-gray-400'}`}>
-                        {label}
-                      </span>
-                    </div>
-                    {i < 1 && <div className={`flex-1 h-px ${done ? 'bg-green-400' : 'bg-gray-200'}`} />}
-                  </React.Fragment>
-                );
-              })}
-            </div>
-
-            {/* STEP 1 — Request Link */}
-            {step === STEPS.REQUEST && (
-              <div className="space-y-4">
-                <div className="flex items-start gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
-                  <Mail className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">Identity Verification Required</p>
-                    <p className="text-sm text-blue-700 dark:text-blue-400 mt-0.5">
-                      A password reset link will be sent to <strong>{getUserEmail()}</strong>. Click the link in the email to securely update your password.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <Button onClick={handleSendLink} disabled={sending} className="min-w-[160px]">
-                    {sending
-                      ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Sending...</>
-                      : <><Mail className="mr-2 h-4 w-4" />Send Reset Link</>}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 2 — Link Sent UI */}
-            {step === STEPS.SENT && (
-              <div className="py-8 flex flex-col items-center gap-4 text-center">
-                <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-2">
-                  <Mail className="h-8 w-8 text-green-600" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-semibold text-gray-900">Check Your Inbox!</h3>
-                  <p className="text-sm text-gray-500 mt-2 max-w-md mx-auto leading-relaxed">
-                    A reset link has been successfully sent to <strong className="text-gray-900">{getUserEmail()}</strong>.
-                    Please check your email and click the link to reset your password.
-                  </p>
-                </div>
-                <div className="mt-4 pt-4 border-t border-gray-200 w-full flex justify-center">
-                  <Button variant="outline" onClick={resetFlow}>Back to Request</Button>
-                </div>
-              </div>
-            )}
-
-          </CardContent>
-        </Card>
 
 
         {/* ── Candidate ID Prefix Card (managers / admins only) ── */}
@@ -369,7 +256,83 @@ export default function AdminSettings() {
           </Card>
         )}
 
+        {/* ── Subscription Plan Card ── */}
+        {(userRole === 'manager' || userRole === 'admin') && (
+          <Card className="overflow-hidden border border-slate-200">
+            <CardHeader className="bg-slate-50/50">
+              <div className="flex items-center gap-2">
+                <Crown className="h-5 w-5 text-amber-500" />
+                <CardTitle>Subscription Plan</CardTitle>
+              </div>
+              <CardDescription>View and manage your organization's subscription plan</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-6 space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Current Plan</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-extrabold text-slate-900">
+                      {currentPlan === 'Basic' ? 'Free Trial' : currentPlan === 'Pro' ? 'Flexi Plan' : 'Premium Plan'}
+                    </span>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                      currentPlan === 'Enterprise'
+                        ? 'bg-amber-100 text-amber-800'
+                        : currentPlan === 'Pro'
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-slate-100 text-slate-800'
+                    }`}>
+                      {currentPlan}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Status</p>
+                  <p className="text-sm font-semibold text-slate-700">
+                    {isExpired ? (
+                      <span className="text-red-600 font-bold">Expired</span>
+                    ) : daysLeft !== null ? (
+                      `${daysLeft} days remaining`
+                    ) : (
+                      'Active'
+                    )}
+                  </p>
+                </div>
+
+                <Button 
+                  onClick={() => setShowUpgradeModal(true)}
+                  className="bg-[#283086] hover:bg-[#1a2060] font-bold shadow-lg shadow-indigo-600/10 min-w-[140px]"
+                >
+                  Upgrade Plan
+                </Button>
+              </div>
+
+              {showBanner && (
+                <div className="flex items-start gap-3 p-4 bg-amber-50 rounded-lg border border-amber-200">
+                  <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-bold text-amber-800">
+                      {isExpired ? 'Subscription Expired' : 'Subscription Ending Soon'}
+                    </p>
+                    <p className="text-xs text-amber-700 mt-1">
+                      {isExpired 
+                        ? 'Your access to premium features has expired. Upgrade your plan to restore full access.'
+                        : `Your free trial is ending in ${daysLeft} days. Upgrade now to avoid service interruption.`}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
       </div>
+
+      <UpgradePlanModal
+        isOpen={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        currentPlan={currentPlan}
+      />
     </div>
   );
 }

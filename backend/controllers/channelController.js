@@ -48,6 +48,7 @@ export const createChannel = async (req, res) => {
       members.push(userId);
     }
 
+    const tenantOwnerId = getTenantOwnerId(req.user);
     const channel = await Channel.create({
       name: name.trim(),
       description: description || '',
@@ -57,10 +58,10 @@ export const createChannel = async (req, res) => {
       canPost: canPost || 'all',
       createdBy: userId,
       members,
+      tenantOwnerId,
     });
 
     // Post a system message
-    const tenantOwnerId = getTenantOwnerId(req.user);
     await Message.create({
       channelId: channel._id,
       senderId: userId,

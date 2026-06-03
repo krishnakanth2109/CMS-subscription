@@ -28,8 +28,10 @@ const jobSchema = mongoose.Schema({
   primaryRecruiter:    { type: String, default: '' },
   secondaryRecruiter:  { type: String, default: '' },
   skills:              { type: String, default: '' },
-  jdLink:              { type: String, default: '' },
+  jobType:             { type: String, default: 'Permanent' },
+  jobDescription:      { type: String, default: '' },
   active:              { type: Boolean, default: true },
+  customFields:        { type: mongoose.Schema.Types.Mixed, default: {} },
   createdBy:           { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 }, {
   timestamps: true,

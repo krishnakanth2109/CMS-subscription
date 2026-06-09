@@ -50,6 +50,62 @@ export const PLANS = {
   },
 };
 
+const PLAN_DETAILS = {
+  Basic: {
+    description: 'Start with the essentials and explore the platform.',
+    ctaLabel: 'Start Free Trial',
+    features: [
+      'Dashboard & analytics',
+      'Candidate management',
+      'Recruiter accounts',
+      'Requirements and schedules',
+      'Settings access',
+    ],
+    locked: ['Client info', 'Invoices', 'Messages', 'Agreements', 'Mock interviews', 'Reports'],
+  },
+  Pro: {
+    description: 'Best for growing teams that need client tracking and reports.',
+    ctaLabel: 'Choose Flexi',
+    popular: true,
+    features: [
+      'Everything in Free Trial',
+      'Client info & management',
+      'Advanced reports',
+      'Requirements and schedules',
+      'Settings access',
+    ],
+    locked: ['Invoices', 'Messages', 'Agreements', 'Mock interviews'],
+  },
+  Enterprise: {
+    description: 'Full access for larger teams and complete workflows.',
+    ctaLabel: 'Choose Premium',
+    features: [
+      'Everything in Flexi',
+      'Invoice generation',
+      'Team messages',
+      'Agreement templates',
+      'AI mock interviews',
+      'Priority support',
+    ],
+    locked: [],
+  },
+};
+
+const buildPublicPlanCatalog = () =>
+  Object.entries(PLANS).map(([key, plan]) => ({
+    key,
+    name: plan.name,
+    label: plan.label,
+    durationDays: plan.durationDays,
+    priceMonthly: plan.priceMonthly ? plan.priceMonthly / 100 : 0,
+    priceYearly: plan.priceYearly ? plan.priceYearly / 100 : 0,
+    ...PLAN_DETAILS[key],
+  }));
+
+router.get('/plans', (_req, res) => {
+  res.json(buildPublicPlanCatalog());
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/payments/create-order-guest   ← ✅ PUBLIC (no auth)
 //

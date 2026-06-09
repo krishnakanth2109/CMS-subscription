@@ -7,6 +7,7 @@ import React, { Suspense, lazy } from 'react';
 const LandingPage = lazy(() => import('@/pages/LandingPage'));
 const Login = lazy(() => import('@/pages/Login'));
 const Register = lazy(() => import('@/pages/Register'));
+const RequestDemo = lazy(() => import('@/pages/RequestDemo'));
 const ForgotPassword = lazy(() => import('@/pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('@/pages/ResetPassword'));
 
@@ -17,6 +18,7 @@ const MasterLayout = lazy(() => import('@/components/MasterLayout'));
 // Master Admin Pages
 const MasterLogin = lazy(() => import('@/pages/master/MasterLogin')); // <-- New Import
 const MasterDashboard = lazy(() => import('@/pages/master/MasterDashboard'));
+const DemoRequests = lazy(() => import('@/pages/master/DemoRequests'));
 const Managers = lazy(() => import('@/pages/master/Managers'));
 const Plans = lazy(() => import('@/pages/master/Plans'));
 const Profile = lazy(() => import('@/pages/master/Profile'));
@@ -79,6 +81,17 @@ function PublicRoute({ children }) {
   return children;
 }
 
+function MasterProtectedRoute({ children }) {
+  const { isAuthenticated, userRole, loading } = useAuth();
+
+  if (loading) return <LoadingFallback />;
+  if (!isAuthenticated || userRole !== 'master') {
+    return <Navigate to="/master" replace />;
+  }
+
+  return children;
+}
+
 function AppRoutes() {
   const { userRole } = useAuth();
 
@@ -89,6 +102,7 @@ function AppRoutes() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
         <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+        <Route path="/request-demo" element={<RequestDemo />} />
         <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/invite" element={<InterviewSession />} />
@@ -103,10 +117,16 @@ function AppRoutes() {
         {/* ===================== MASTER ROUTES ===================== */}
         {/* URL: /master is strictly the login form */}
         <Route path="/master" element={<MasterLogin />} />
+        <Route path="/master/demo-requests" element={<Navigate to="/master-panel/demo-requests" replace />} />
 
         {/* URL: /master-panel contains the logged-in dashboard and sidebar */}
-        <Route path="/master-panel" element={<MasterLayout />}>
+        <Route path="/master-panel" element={
+          <MasterProtectedRoute>
+            <MasterLayout />
+          </MasterProtectedRoute>
+        }>
           <Route index element={<MasterDashboard />} />
+          <Route path="demo-requests" element={<DemoRequests />} />
           <Route path="managers" element={<Managers />} />
           <Route path="plans" element={<Plans />} />
           <Route path="profile" element={<Profile />} />

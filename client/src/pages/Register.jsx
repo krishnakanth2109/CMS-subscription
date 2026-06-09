@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+/////import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Building2, User, Mail, Lock, Phone, ArrowRight,
   Loader2, CheckCircle2, AlertCircle,
@@ -50,6 +50,8 @@ const PLANS = [
   },
 ];
 
+const PLAN_KEYS = new Set(PLANS.map((plan) => plan.key));
+
 // ─── clsx shim ────────────────────────────────────────────────────────────────
 function clsx(...args) {
   return args.filter(Boolean).join(' ');
@@ -98,6 +100,8 @@ function loadRazorpay() {
 // ─── Register Component ───────────────────────────────────────────────────────
 export default function Register() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const planFromQuery = searchParams.get('plan');
 
   const [formData, setFormData] = useState({
     name:        '',
@@ -106,7 +110,9 @@ export default function Register() {
     phone:       '',
     password:    '',
   });
-  const [selectedPlan, setSelectedPlan] = useState('Basic');
+  const [selectedPlan, setSelectedPlan] = useState(() =>
+    PLAN_KEYS.has(planFromQuery) ? planFromQuery : 'Basic'
+  );
   const [loading, setLoading]           = useState(false);
   const [error, setError]               = useState(null);
   const [success, setSuccess]           = useState(false);

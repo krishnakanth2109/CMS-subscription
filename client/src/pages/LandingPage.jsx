@@ -7,12 +7,75 @@ import {
   Users, Settings, Image as ImageIcon, BarChart3,
   Sun, Moon // 👈 Added Sun and Moon icons for the theme toggle
 } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowRight, Crown, Sparkles, Zap } from 'lucide-react';
+
+const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+const API_URL = BASE_URL.endsWith('/api') ? BASE_URL : `${BASE_URL}/api`;
+
+const formatPlanPrice = (price) => {
+  if (!price) return 'Free';
+
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(price);
+};
+
+const PLAN_VISUALS = {
+  Basic: {
+    Icon: Sparkles,
+    eyebrow: 'Starter access',
+    iconClass: 'bg-slate-100 text-slate-600 border-slate-200',
+    priceClass: 'text-foreground',
+  },
+  Pro: {
+    Icon: Zap,
+    eyebrow: 'Most popular',
+    iconClass: 'bg-accent/10 text-accent border-accent/30',
+    priceClass: 'text-accent',
+  },
+  Enterprise: {
+    Icon: Crown,
+    eyebrow: 'Full platform',
+    iconClass: 'bg-amber-100 text-amber-700 border-amber-200',
+    priceClass: 'text-amber-600 dark:text-amber-400',
+  },
+};
+
+const getPlanVisual = (plan) =>
+  PLAN_VISUALS[plan.key] || {
+    Icon: Sparkles,
+    eyebrow: plan.name || 'Plan',
+    iconClass: 'bg-secondary text-foreground border-border',
+    priceClass: 'text-foreground',
+  };
+
+const getPlanCardClass = (plan) =>
+  [
+    'relative flex h-full min-w-0 flex-col rounded-xl border p-5 shadow-sm transition-all duration-300 sm:p-6 lg:p-7',
+    'bg-background/85 shadow-sm hover:-translate-y-1 hover:shadow-xl',
+    plan.popular
+      ? 'border-accent shadow-accent/10'
+      : 'border-border hover:border-accent/40',
+  ].join(' ');
+
+const getPlanButtonClass = (plan) =>
+  [
+    'mt-auto inline-flex w-full items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition-all',
+    plan.popular
+      ? 'bg-accent text-accent-foreground shadow-lg shadow-accent/20 hover:opacity-90'
+      : 'border border-border bg-background hover:border-accent/50 hover:bg-secondary',
+  ].join(' ');
 
 export default function LandingPage() {
   const navigate = useNavigate();
 
   // ================= THEME TOGGLE LOGIC =================
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+  const [pricingPlans, setPricingPlans] = useState([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [plansError, setPlansError] = useState('');
 
   useEffect(() => {
     // Apply the theme to the <html> tag
@@ -24,6 +87,33 @@ export default function LandingPage() {
     // Save to local storage so it remembers on refresh
     localStorage.setItem('theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const fetchPlans = async () => {
+      setPlansLoading(true);
+      setPlansError('');
+
+      try {
+        const res = await fetch(`${API_URL}/payments/plans`);
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.message || 'Failed to load plans');
+        if (!ignore) setPricingPlans(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (!ignore) setPlansError(err.message || 'Unable to load plans');
+      } finally {
+        if (!ignore) setPlansLoading(false);
+      }
+    };
+
+    fetchPlans();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const toggleTheme = () => {
     setTheme(theme === 'dark' ? 'light' : 'dark');
@@ -60,7 +150,7 @@ export default function LandingPage() {
               className="h-10 w-10 object-cover rounded-lg shadow-sm"
             />
             <span className="text-xl font-semibold tracking-tight text-foreground">
-              Nexora
+              VTS Tracker
             </span>
           </div>
           
@@ -130,10 +220,12 @@ export default function LandingPage() {
             <Link to="/register" className="bg-primary text-primary-foreground rounded-full px-8 py-3.5 text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-primary/20">
               Get Started
             </Link>
-            <button className="flex items-center justify-center h-12 w-12 rounded-full border-0 bg-background shadow-[0_2px_12px_rgba(0,0,0,0.08)] hover:bg-background/80 transition-all">
-              <Play className="h-4 w-4 fill-foreground text-foreground ml-1" />
-            </button>
-            <span className="text-sm font-medium text-foreground ml-2 hidden sm:block">Request Demo</span>
+            <Link to="/request-demo" className="flex items-center gap-3 text-sm font-medium text-foreground hover:text-accent transition-colors">
+              <span className="flex items-center justify-center h-12 w-12 rounded-full border-0 bg-background shadow-[0_2px_12px_rgba(0,0,0,0.08)] hover:bg-background/80 transition-all">
+                <Play className="h-4 w-4 fill-foreground text-foreground ml-1" />
+              </span>
+              <span className="hidden sm:block">Request Demo</span>
+            </Link>
           </motion.div>
 
           {/* Custom Coded Dashboard Preview */}
@@ -150,8 +242,8 @@ export default function LandingPage() {
                 {/* Topbar */}
                 <div className="flex justify-between items-center px-4 py-3 border-b border-slate-200 bg-white">
                   <div className="flex items-center gap-3">
-                    <div className="w-6 h-6 bg-blue-600 text-white rounded flex items-center justify-center font-bold text-xs">N</div>
-                    <span className="font-semibold text-sm text-slate-900">Nexora CMS</span>
+                    <div className="w-6 h-6 bg-blue-600 text-white rounded flex items-center justify-center font-bold text-xs">V</div>
+                    <span className="font-semibold text-sm text-slate-900">VTS Tracker</span>
                     <ChevronDown className="h-3 w-3 text-slate-500" />
                   </div>
                   <div className="flex items-center gap-4">
@@ -290,70 +382,94 @@ export default function LandingPage() {
 
       {/* ================= PRICING SECTION ================= */}
       <section id="pricing" className="py-24 px-6 md:px-12 lg:px-20 max-w-7xl mx-auto">
-        <h2 className="text-3xl md:text-4xl font-display font-bold text-center mb-16">Simple Pricing Plans</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-center">
-          
-          {/* Basic Plan */}
-          <div className="border border-border p-8 rounded-3xl flex flex-col bg-background/50 hover:border-accent/50 transition-colors">
-            <h3 className="text-xl font-bold mb-2">Basic Plan</h3>
-            <p className="text-muted-foreground text-sm mb-6">Best for individuals & small projects</p>
-            <div className="text-4xl font-bold mb-8">₹499<span className="text-lg text-muted-foreground font-normal">/mo</span></div>
-            <ul className="space-y-4 mb-8 flex-1">
-              {['Limited Pages & Posts', 'Basic SEO Tools', 'Standard Support', '5 GB Storage', 'Single User Access'].map((feature, i) => (
-                <li key={i} className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CheckCircle2 className="w-4 h-4 text-accent" /> {feature}
-                </li>
-              ))}
-            </ul>
-            <button 
-              onClick={() => handlePlanClick('Basic')} 
-              className="w-full py-3 rounded-full border border-border font-medium hover:bg-secondary transition-colors"
-            >
-              Choose Basic
-            </button>
-          </div>
-
-          {/* Standard Plan (MOST POPULAR) */}
-          <div className="border-2 border-accent p-8 rounded-3xl flex flex-col relative transform md:-translate-y-4 shadow-2xl shadow-accent/20 bg-background">
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-accent text-accent-foreground px-4 py-1.5 rounded-full text-xs font-bold tracking-wide shadow-lg">MOST POPULAR</div>
-            <h3 className="text-xl font-bold mb-2">Standard Plan</h3>
-            <p className="text-muted-foreground text-sm mb-6">Perfect for growing businesses</p>
-            <div className="text-4xl font-bold mb-8 text-accent">₹999<span className="text-lg text-muted-foreground font-normal">/mo</span></div>
-            <ul className="space-y-4 mb-8 flex-1">
-              {['Unlimited Pages & Posts', 'Advanced SEO Tools', 'Priority Support', '20 GB Storage', 'Up to 5 Users', 'Analytics Dashboard'].map((feature, i) => (
-                <li key={i} className="flex items-center gap-2 text-sm text-foreground font-medium">
-                  <CheckCircle2 className="w-4 h-4 text-accent" /> {feature}
-                </li>
-              ))}
-            </ul>
-            <button 
-              onClick={() => handlePlanClick('Pro')} 
-              className="w-full py-3 rounded-full bg-accent text-accent-foreground font-medium hover:opacity-90 transition-opacity shadow-md shadow-accent/20"
-            >
-              Choose Standard
-            </button>
-          </div>
-
-          {/* Premium Plan */}
-          <div className="border border-border p-8 rounded-3xl flex flex-col bg-background/50 hover:border-accent/50 transition-colors">
-            <h3 className="text-xl font-bold mb-2">Premium Plan</h3>
-            <p className="text-muted-foreground text-sm mb-6">Ideal for enterprises & large-scale</p>
-            <div className="text-4xl font-bold mb-8 text-accent">₹1999<span className="text-lg text-muted-foreground font-normal">/mo</span></div>
-            <ul className="space-y-4 mb-8 flex-1">
-              {['Unlimited Everything', 'Advanced Analytics', '24/7 Dedicated Support', '100 GB Storage', 'Unlimited Users', 'API Access'].map((feature, i) => (
-                <li key={i} className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CheckCircle2 className="w-4 h-4 text-accent" /> {feature}
-                </li>
-              ))}
-            </ul>
-            <button 
-              onClick={() => handlePlanClick('Enterprise')} 
-              className="w-full py-3 rounded-full border border-border font-medium hover:bg-secondary transition-colors"
-            >
-              Choose Premium
-            </button>
-          </div>
+        <div className="mx-auto mb-14 max-w-3xl text-center">
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-accent">Pricing</p>
+          <h2 className="mt-3 text-3xl md:text-4xl font-display font-bold">Choose the plan that fits your hiring flow</h2>
+          <p className="mt-4 text-base md:text-lg text-muted-foreground">
+            Start lean, unlock advanced workflows when your team needs them, and keep every plan connected to the same VTS Tracker workspace.
+          </p>
         </div>
+
+        {plansLoading ? (
+          <div className="flex min-h-64 items-center justify-center rounded-lg border border-border bg-secondary/20 text-muted-foreground">
+            <Loader2 className="w-6 h-6 animate-spin mr-3" />
+            Loading plans...
+          </div>
+        ) : plansError ? (
+          <div className="max-w-xl mx-auto rounded-lg border border-destructive/20 bg-destructive/10 p-5 text-destructive flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold">Unable to load pricing plans</p>
+              <p className="text-sm opacity-80 mt-1">{plansError}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 lg:items-stretch">
+            {pricingPlans.map((plan) => {
+              const visual = getPlanVisual(plan);
+              const Icon = visual.Icon;
+
+              return (
+                <motion.div
+                  key={plan.key}
+                  initial={{ opacity: 0, y: 18 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, margin: '-80px' }}
+                  transition={{ duration: 0.45 }}
+                  className={getPlanCardClass(plan)}
+                >
+                  <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border ${visual.iconClass}`}>
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div className="flex min-w-0 flex-wrap justify-end gap-2">
+                      {plan.popular}
+                      <span className="rounded-full border border-border bg-secondary/40 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                        {visual.eyebrow}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-7">
+                    <h3 className="break-words text-2xl font-bold tracking-tight">{plan.label}</h3>
+                    <p className="mt-2 break-words text-sm leading-relaxed text-muted-foreground">{plan.description}</p>
+                  </div>
+
+                  <div className="mt-6 border-y border-border py-5">
+                    <div className={`break-words text-4xl font-extrabold tracking-tight ${visual.priceClass}`}>
+                      {formatPlanPrice(plan.priceMonthly)}
+                      {plan.priceMonthly > 0 && (
+                        <span className="ml-1 text-base font-semibold text-muted-foreground">/mo</span>
+                      )}
+                    </div>
+                    <p className="mt-2 break-words text-xs font-medium leading-relaxed text-muted-foreground">
+                      {plan.priceYearly > 0
+                        ? `${formatPlanPrice(plan.priceYearly)} billed yearly available`
+                        : `${plan.durationDays || 7} days free trial included`}
+                    </p>
+                  </div>
+
+                  <ul className="mt-6 flex-1 space-y-3 pb-6">
+                    {(plan.features || []).map((feature) => (
+                      <li key={feature} className="flex items-start gap-3 text-sm leading-6 text-muted-foreground">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+                        <span className="min-w-0 break-words leading-relaxed">{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <button
+                    onClick={() => handlePlanClick(plan.key)}
+                    className={getPlanButtonClass(plan)}
+                  >
+                    {plan.ctaLabel || `Choose ${plan.label}`}
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* CTA Footer Section */}
@@ -365,9 +481,9 @@ export default function LandingPage() {
             <Link to="/register" className="bg-primary text-primary-foreground rounded-full px-8 py-4 text-sm font-semibold w-full sm:w-auto hover:opacity-90 transition-opacity shadow-lg shadow-primary/20">
               Get Started Now
             </Link>
-            <button className="bg-transparent border border-border text-foreground rounded-full px-8 py-4 text-sm font-semibold w-full sm:w-auto hover:bg-secondary transition-colors">
+            <Link to="/request-demo" className="bg-transparent border border-border text-foreground rounded-full px-8 py-4 text-sm font-semibold w-full sm:w-auto hover:bg-secondary transition-colors text-center">
               Contact Us for Demo
-            </button>
+            </Link>
           </div>
         </div>
         
@@ -378,7 +494,7 @@ export default function LandingPage() {
               alt="CMS Logo" 
               className="h-6 w-6 object-cover rounded shadow-sm opacity-80 grayscale"
             />
-            <span className="font-semibold text-foreground">Nexora CMS</span>
+            <span className="font-semibold text-foreground">VTS Tracker</span>
           </div>
           <div className="flex gap-6">
             <a href="#" className="hover:text-foreground transition-colors">About Us</a>
@@ -386,7 +502,7 @@ export default function LandingPage() {
             <a href="#" className="hover:text-foreground transition-colors">Privacy Policy</a>
             <a href="#" className="hover:text-foreground transition-colors">Terms</a>
           </div>
-          <div>© {new Date().getFullYear()} Nexora CMS. All rights reserved.</div>
+          <div>© {new Date().getFullYear()} VTS Tracker. All rights reserved.</div>
         </div>
       </footer>
 

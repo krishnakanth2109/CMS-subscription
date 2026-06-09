@@ -36,6 +36,7 @@ import agreementLetterRoutes    from './routes/agreementLetterRoutes.js';
 import agreementEmailRoutes     from './routes/agreementEmailRoutes.js';
 import agreementUploadRoutes    from './routes/agreementUploadRoutes.js';
 import masterRoutes             from './routes/masterRoutes.js';
+import demoRequestRoutes        from './routes/demoRequestRoutes.js';
 
 // ── __dirname shim for ES Modules ─────────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
@@ -156,6 +157,7 @@ app.use('/api/ai-mock',    aiMockRoutes);
 app.use('/api/payments',   paymentRoutes);
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/score-match', scoreMatchRoutes);
+app.use('/api/demo-requests', demoRequestRoutes);
 
 
 // Agreement module
@@ -180,6 +182,7 @@ app.use('/ai-mock',    aiMockRoutes);
 app.use('/payments',   paymentRoutes);    // 🔹 FIXED: Added missing payment fallback
 app.use('/submissions', submissionRoutes);
 app.use('/master',     masterRoutes);     // 🔹 FIXED: Added missing master fallback
+app.use('/demo-requests', demoRequestRoutes);
 
 app.use('/',           aiMockRoutes);
 

@@ -2,6 +2,13 @@ import Channel from '../models/Channel.js';
 import Message from '../models/Message.js';
 import User from '../models/User.js';
 import { getTenantOwnerId } from '../middleware/authMiddleware.js';
+import { v2 as cloudinary } from 'cloudinary';
+
+cloudinary.config({
+  cloud_name: process.env.CLOUD_NAME,
+  api_key:    process.env.CLOUD_API_KEY,
+  api_secret: process.env.CLOUD_API_SECRET,
+});
 
 // ── GET /api/channels  — list channels the user belongs to (or all public if admin)
 export const getChannels = async (req, res) => {
@@ -189,8 +196,8 @@ export const sendChannelMessage = async (req, res) => {
       return res.status(403).json({ message: 'Not a member of this channel' });
     }
 
-    const { content, replyTo, replyPreview } = req.body;
-    if (!content?.trim()) return res.status(400).json({ message: 'Content is required' });
+    const { content, replyTo, replyPreview, attachment } = req.body;
+    if (!content?.trim() && !attachment) return res.status(400).json({ message: 'Content or attachment is required' });
 
     const senderName = [firstName, lastName].filter(Boolean).join(' ') || username || 'User';
 
@@ -199,12 +206,13 @@ export const sendChannelMessage = async (req, res) => {
       channelId: channel._id,
       senderId: userId,
       senderName,
-      content: content.trim(),
+      content: content?.trim() || '',
       type: 'text',
       replyTo: replyTo || null,
       replyPreview: replyPreview || '',
       readBy: [userId],
       tenantOwnerId,
+      ...(attachment ? { attachment } : {}),
     });
 
     // Update channel last message
@@ -249,6 +257,35 @@ export const updateChannelMembers = async (req, res) => {
   }
 };
 
+// ── PUT /api/channels/:channelId/messages/:msgId — Edit a channel message
+export const editChannelMessage = async (req, res) => {
+  try {
+    const { role, _id: userId } = req.user;
+    const msg = await Message.findById(req.params.msgId);
+    if (!msg) return res.status(404).json({ message: 'Message not found' });
+    if (msg.deletedAt) return res.status(400).json({ message: 'Cannot edit a deleted message' });
+
+    const isOwner = msg.senderId?.toString() === userId.toString();
+    if (!isOwner) return res.status(403).json({ message: 'Not authorized' });
+
+    // 15-minute edit window
+    const ageMs = Date.now() - new Date(msg.createdAt).getTime();
+    if (ageMs > 15 * 60 * 1000) {
+      return res.status(403).json({ message: 'Edit window expired (15 minutes)' });
+    }
+
+    const { content } = req.body;
+    if (!content?.trim()) return res.status(400).json({ message: 'Content is required' });
+
+    msg.content = content.trim();
+    msg.edited  = true;
+    await msg.save();
+    res.json(msg);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // ── DELETE /api/channels/:channelId/messages/:msgId
 export const deleteChannelMessage = async (req, res) => {
   try {
@@ -259,6 +296,18 @@ export const deleteChannelMessage = async (req, res) => {
     const isOwner = msg.senderId?.toString() === userId.toString();
     if (role !== 'admin' && !isOwner) {
       return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    // Delete Cloudinary asset if attachment exists
+    if (msg.attachment?.publicId) {
+      try {
+        const isImage = msg.attachment.fileType?.startsWith('image/');
+        await cloudinary.uploader.destroy(msg.attachment.publicId, {
+          resource_type: isImage ? 'image' : 'raw',
+        });
+      } catch (cdnErr) {
+        console.warn('[Chat] Cloudinary delete failed:', cdnErr.message);
+      }
     }
 
     msg.deletedAt = new Date();

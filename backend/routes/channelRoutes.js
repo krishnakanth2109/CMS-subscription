@@ -8,6 +8,7 @@ import {
   getChannelMessages,
   sendChannelMessage,
   updateChannelMembers,
+  editChannelMessage,
   deleteChannelMessage,
 } from '../controllers/channelController.js';
 
@@ -27,6 +28,7 @@ router.route('/:id/messages')
   .post(sendChannelMessage);
 
 router.put('/:id/members', updateChannelMembers);
+router.put('/:id/messages/:msgId',    editChannelMessage);
 router.delete('/:id/messages/:msgId', deleteChannelMessage);
 
 export default router;

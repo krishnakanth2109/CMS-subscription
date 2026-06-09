@@ -18,6 +18,38 @@ const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').repla
 const API_URL  = BASE_URL.endsWith('/api') ? BASE_URL : `${BASE_URL}/api`;
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f43f5e'];
+const PIPELINE_STEPS = [
+  'Submitted',
+  'Shared Profiles',
+  'Yet to Attend',
+  'Turnups',
+  'Selected',
+  'Hold',
+  'Rejected',
+  'No Show',
+  'Backout',
+  'Joined',
+];
+
+const normalizePipelineStatus = (status) => {
+  if (!status) return 'Submitted';
+  const cleaned = String(status).trim();
+  const lowered = cleaned.toLowerCase();
+  const compact = lowered.replace(/[^a-z0-9]/g, '');
+  if (compact === 'yettoattend') return 'Yet to Attend';
+  if (['sharedprofile', 'sharedprofiles', 'shareprofile', 'shareprofiles'].includes(compact)) return 'Shared Profiles';
+  if (compact === 'turnup' || compact === 'turnups') return 'Turnups';
+  return cleaned;
+};
+
+const getPipelineStatuses = (status) => {
+  const statuses = Array.isArray(status)
+    ? status
+    : String(status || 'Submitted').split(',').map(s => s.trim()).filter(Boolean);
+
+  return [...new Set(statuses.map(normalizePipelineStatus))]
+    .filter(statusName => PIPELINE_STEPS.includes(statusName));
+};
 
 const safeDate = (d) => {
   if (!d) return null;
@@ -173,10 +205,11 @@ export default function AdminReports() {
     // Pipeline Data
     const statusCounts = {};
     candidates.forEach(c => {
-      const s = Array.isArray(c.status) ? c.status[c.status.length - 1] || 'Submitted' : c.status || 'Submitted';
-      statusCounts[s] = (statusCounts[s] || 0) + 1;
+      getPipelineStatuses(c.status).forEach(statusName => {
+        statusCounts[statusName] = (statusCounts[statusName] || 0) + 1;
+      });
     });
-    const pipelineData = Object.entries(statusCounts).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
+    const pipelineData = PIPELINE_STEPS.map(name => ({ name, value: statusCounts[name] || 0 }));
 
     // Source Data
     const sourceCounts = {};
@@ -376,7 +409,7 @@ export default function AdminReports() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={metrics.pipelineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                      <XAxis dataKey="name" tick={{fontSize: 12, fill: '#64748b'}} axisLine={false} tickLine={false} />
+                      <XAxis dataKey="name" interval={0} tick={{fontSize: 11, fill: '#64748b'}} axisLine={false} tickLine={false} />
                       <YAxis tick={{fontSize: 12, fill: '#64748b'}} axisLine={false} tickLine={false} />
                       <RechartsTooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)'}} />
                       <Bar dataKey="value" fill="#3b82f6" radius={[6,6,0,0]} barSize={40} />
@@ -419,7 +452,7 @@ export default function AdminReports() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="name" tick={{fontSize: 12, fill: '#64748b'}} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="name" interval={0} tick={{fontSize: 11, fill: '#64748b'}} axisLine={false} tickLine={false} />
                     <YAxis tick={{fontSize: 12, fill: '#64748b'}} axisLine={false} tickLine={false} />
                     <RechartsTooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)'}} />
                     <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />

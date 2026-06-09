@@ -46,6 +46,15 @@ export const createSubmission = async (req, res) => {
     });
 
     await newSubmission.save();
+    
+    // Sync Candidate model to maintain single source of truth for dashboard/tables
+    await Candidate.findByIdAndUpdate(candidateId, {
+      $set: {
+        client: client.companyName,
+        status: ['Submitted']
+      }
+    });
+
     res.status(201).json({ message: 'Candidate successfully delivered to client', submission: newSubmission });
   } catch (error) {
     console.error('Create submission error:', error);
@@ -71,7 +80,7 @@ export const getSubmissions = async (req, res) => {
     }
 
     const submissions = await CandidateSubmission.find(query)
-      .populate('candidateId', 'firstName lastName name email contact position candidateId recruiterName status')
+      .populate('candidateId', 'firstName lastName name email contact phone mobile contactNumber position candidateId recruiterName assignedRecruiter status skills totalExperience relevantExperience experience')
       .populate('jobId', 'jobCode position')
       .sort({ createdAt: -1 })
       .lean();
@@ -104,6 +113,13 @@ export const updateSubmissionStatus = async (req, res) => {
       { $set: updateData },
       { new: true }
     );
+
+    // Sync Candidate model to keep dashboards and UI in sync
+    if (status) {
+      await Candidate.findByIdAndUpdate(updated.candidateId, {
+        $set: { status: [status] }
+      });
+    }
 
     res.json({ message: 'Submission updated successfully', submission: updated });
   } catch (error) {

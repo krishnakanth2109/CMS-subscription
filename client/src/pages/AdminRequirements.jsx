@@ -4,14 +4,20 @@ import { useAuth } from "@/context/AuthContext";
 import {
   X, Eye, Pencil, Plus, CheckCircle, Ban,
   Briefcase, Building2, Calendar, MapPin, Trash2,
-  Settings2, Check, Loader2, Upload, Users,
+  Settings2, Check, Loader2, Upload, Users, ChevronDown, ChevronUp, Info
 } from "lucide-react";
 import JobDetailsModal, { JobCodeButton } from "@/components/JobDetailsModal";
+import CandidateDetailsModal from "@/components/CandidateDetailsModal";
+import { ScoreBadge, MatchBreakdownBar, SkillChips, MatchReasonBox, getScoreValue, getMatchLevelClass } from "@/components/Score/ScoreComponents";
+import { getMatchingCandidatesByJobId } from "@/utils/candidateMatching";
 
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
 const API_URL = `${BASE_URL}/api`;
 
 const inputCls = "w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-zinc-500 bg-white dark:bg-zinc-900 dark:text-zinc-100 placeholder-zinc-400";
+
+// Score components imported from shared module — re-exported for backward compatibility
+export { ScoreBadge, MatchBreakdownBar, SkillChips, MatchReasonBox, getScoreValue, getMatchLevelClass } from "@/components/Score/ScoreComponents";
 
 const getCurrentUser = () => {
   try {
@@ -59,6 +65,12 @@ const CustomFieldInput = ({ cf, value, onChange }) => {
   );
 };
 
+const splitSkills = (value) => {
+  if (Array.isArray(value)) return value.map(skill => String(skill).trim()).filter(Boolean);
+  if (typeof value === 'string') return value.split(/[,;\n]+/).map(skill => skill.trim()).filter(Boolean);
+  return [];
+};
+
 /* ────────────────────── MAIN COMPONENT ──────────────────────── */
 export default function AdminRequirements() {
   const { toast } = useToast();
@@ -91,6 +103,8 @@ export default function AdminRequirements() {
   const [candidateModalSearch, setCandidateModalSearch] = useState('');
   const [jobCandidates, setJobCandidates] = useState([]);
   const [isLoadingJobCandidates, setIsLoadingJobCandidates] = useState(false);
+  const [expandedCandidateId, setExpandedCandidateId] = useState(null);
+  const [selectedCandidateDetails, setSelectedCandidateDetails] = useState(null);
   const [allCandidates, setAllCandidates] = useState([]);
   const [clients, setClients] = useState([]);
   const [recruiters, setRecruiters] = useState([]);
@@ -98,12 +112,15 @@ export default function AdminRequirements() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedClientFilter, setSelectedClientFilter] = useState("");
+  const [selectedLocationFilter, setSelectedLocationFilter] = useState("");
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState("");
 
   const initialFormState = {
     jobCode: "", clientName: "", position: "", location: "", jobType: "",
     experience: "", relevantExperience: "", qualification: "",
     salaryBudget: "", monthlySalary: "", gender: "Any", noticePeriod: "",
     tatTime: "", primaryRecruiter: "", secondaryRecruiter: "", skills: "",
+    mandatorySkills: [], preferredSkills: [],
     jobDescription: "", active: true, customFields: {},
   };
 
@@ -113,6 +130,7 @@ export default function AdminRequirements() {
   const [editingJob, setEditingJob] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [skillInput, setSkillInput] = useState("");
+  const [preferredSkillInput, setPreferredSkillInput] = useState("");
   const [isJDModalOpen, setIsJDModalOpen] = useState(false);
   const [isImportingJD, setIsImportingJD] = useState(false);
   const pdfInputRef = useRef(null);
@@ -124,6 +142,7 @@ export default function AdminRequirements() {
     setForm(initialFormState);
     setErrors({});
     setSkillInput("");
+    setPreferredSkillInput("");
     setIsJDModalOpen(false);
     setIsImportingJD(false);
   };
@@ -133,6 +152,7 @@ export default function AdminRequirements() {
     setForm(initialFormState);
     setErrors({});
     setSkillInput("");
+    setPreferredSkillInput("");
     setIsImportingJD(false);
     setShowForm(true);
   };
@@ -264,43 +284,55 @@ export default function AdminRequirements() {
     setForm(prev => ({ ...prev, customFields: { ...prev.customFields, [fieldName]: value } }));
   };
 
-  const skillBadges = useMemo(
-    () => (form.skills || "").split(",").map(skill => skill.trim()).filter(Boolean),
-    [form.skills],
+  const skillBadges = useMemo(() => {
+    const mandatorySkills = splitSkills(form.mandatorySkills);
+    return mandatorySkills.length ? mandatorySkills : splitSkills(form.skills);
+  }, [form.mandatorySkills, form.skills]);
+
+  const preferredSkillBadges = useMemo(
+    () => splitSkills(form.preferredSkills),
+    [form.preferredSkills],
   );
 
-  const updateSkills = (nextSkills) => {
-    setForm(prev => ({ ...prev, skills: nextSkills.join(", ") }));
+  const updateSkills = (nextSkills, field = 'mandatorySkills') => {
+    setForm(prev => ({
+      ...prev,
+      [field]: nextSkills,
+      ...(field === 'mandatorySkills' ? { skills: nextSkills.join(", ") } : {}),
+    }));
     if (errors.skills) setErrors(prev => { const n = { ...prev }; delete n.skills; return n; });
   };
 
-  const addSkillsFromText = (text) => {
-    const incoming = text.split(/[\n,]+/).map(skill => skill.trim()).filter(Boolean);
+  const addSkillsFromText = (text, field = 'mandatorySkills') => {
+    const incoming = text.split(/[\n,;]+/).map(skill => skill.trim()).filter(Boolean);
     if (!incoming.length) return;
-    const merged = [...skillBadges];
+    const source = field === 'preferredSkills' ? preferredSkillBadges : skillBadges;
+    const merged = [...source];
     incoming.forEach(skill => {
       if (!merged.some(existing => existing.toLowerCase() === skill.toLowerCase())) merged.push(skill);
     });
-    updateSkills(merged);
-    setSkillInput("");
+    updateSkills(merged, field);
+    if (field === 'preferredSkills') setPreferredSkillInput("");
+    else setSkillInput("");
   };
 
-  const handleSkillKeyDown = (e) => {
+  const handleSkillKeyDown = (e, field = 'mandatorySkills') => {
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
-      addSkillsFromText(skillInput);
+      addSkillsFromText(field === 'preferredSkills' ? preferredSkillInput : skillInput, field);
     }
   };
 
-  const handleSkillPaste = (e) => {
+  const handleSkillPaste = (e, field = 'mandatorySkills') => {
     const pasted = e.clipboardData.getData("text");
-    if (!/[\n,]/.test(pasted)) return;
+    if (!/[\n,;]/.test(pasted)) return;
     e.preventDefault();
-    addSkillsFromText(pasted);
+    addSkillsFromText(pasted, field);
   };
 
-  const removeSkill = (skillToRemove) => {
-    updateSkills(skillBadges.filter(skill => skill !== skillToRemove));
+  const removeSkill = (skillToRemove, field = 'mandatorySkills') => {
+    const source = field === 'preferredSkills' ? preferredSkillBadges : skillBadges;
+    updateSkills(source.filter(skill => skill !== skillToRemove), field);
   };
 
   // ── Settings ───────────────────────────────────────────────────
@@ -378,7 +410,7 @@ export default function AdminRequirements() {
         newErrors.primaryRecruiter = "Must be different from Secondary";
       }
     }
-    if (!isHidden('skills') && !trimStr(form.skills)) newErrors.skills = "At least one skill is required";
+    if (!isHidden('skills') && skillBadges.length === 0) newErrors.skills = "At least one mandatory skill is required";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -400,7 +432,9 @@ export default function AdminRequirements() {
       monthlySalary: isHidden('monthlySalary') ? "" : (form.monthlySalary?.trim() || ""),
       noticePeriod: isHidden('noticePeriod') ? "" : (form.noticePeriod?.trim() || ""),
       tatTime: isHidden('tatTime') ? null : (form.tatTime || null),
-      skills: isHidden('skills') ? "" : form.skills.trim(),
+      skills: isHidden('skills') ? "" : skillBadges.join(", "),
+      mandatorySkills: isHidden('skills') ? [] : skillBadges,
+      preferredSkills: isHidden('skills') ? [] : preferredSkillBadges,
       jobDescription: isHidden('jobDescription') ? "" : (form.jobDescription?.trim() || ""),
       jobType: form.jobType || "",
       customFields: form.customFields || {},
@@ -426,7 +460,15 @@ export default function AdminRequirements() {
     setEditingJob(job);
     setErrors({});
     setSkillInput("");
-    setForm({ ...initialFormState, ...job, tatTime: job.tatTime ? new Date(job.tatTime).toISOString().substring(0, 10) : "", customFields: job.customFields || {} });
+    setPreferredSkillInput("");
+    setForm({
+      ...initialFormState,
+      ...job,
+      mandatorySkills: splitSkills(job.mandatorySkills).length ? splitSkills(job.mandatorySkills) : splitSkills(job.skills),
+      preferredSkills: splitSkills(job.preferredSkills),
+      tatTime: job.tatTime ? new Date(job.tatTime).toISOString().substring(0, 10) : "",
+      customFields: job.customFields || {},
+    });
     setShowForm(true);
   };
   const handleToggleActive = async (job) => {
@@ -470,49 +512,26 @@ export default function AdminRequirements() {
     }
   };
 
-  const normalizeSkill = (s) => (s || '').toString().trim().toLowerCase();
-  const getJobSkills = (job) =>
-    (job?.skills || '')
-      .toString()
-      .split(',')
-      .map((s) => normalizeSkill(s))
-      .filter(Boolean);
-
   const filteredJobs = useMemo(() => jobs.filter(j => {
     const matchesSearch = j.position?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       j.clientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       j.jobCode?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesClient = selectedClientFilter === "" || j.clientName === selectedClientFilter;
-    return matchesSearch && matchesClient;
-  }), [jobs, searchTerm, selectedClientFilter]);
+    const matchesLocation = selectedLocationFilter === "" || j.location === selectedLocationFilter;
+    const statusVal = j.active !== false ? "Active" : "Inactive";
+    const matchesStatus = selectedStatusFilter === "" || statusVal === selectedStatusFilter;
+    
+    return matchesSearch && matchesClient && matchesLocation && matchesStatus;
+  }), [jobs, searchTerm, selectedClientFilter, selectedLocationFilter, selectedStatusFilter]);
 
-  const matchingCandidatesByJobId = useMemo(() => {
-    if (!filteredJobs.length || !allCandidates.length) return {};
-    const result = {};
+  const uniqueLocations = useMemo(() => [...new Set(jobs.map(j => j.location).filter(Boolean))].sort(), [jobs]);
+  const uniqueClients = useMemo(() => [...new Set(clients.map(c => c.companyName).filter(Boolean))].sort(), [clients]);
+  const uniqueStatuses = useMemo(() => [...new Set(jobs.map(j => j.active !== false ? "Active" : "Inactive"))].sort(), [jobs]);
 
-    for (const job of filteredJobs) {
-      const required = getJobSkills(job);
-      if (required.length === 0) {
-        result[job.id] = [];
-        continue;
-      }
-      const requiredSet = new Set(required);
-      const matches = [];
-      for (const c of allCandidates) {
-        const candSkills = Array.isArray(c.skills) ? c.skills : (typeof c.skills === 'string' ? c.skills.split(',') : []);
-        let hit = 0;
-        for (const raw of candSkills) {
-          const skill = normalizeSkill(raw);
-          if (!skill) continue;
-          if (requiredSet.has(skill)) hit += 1;
-          if (hit >= 3) break;
-        }
-        if (hit >= 3) matches.push(c);
-      }
-      result[job.id] = matches;
-    }
-    return result;
-  }, [filteredJobs, allCandidates]);
+  const matchingCandidatesByJobId = useMemo(
+    () => getMatchingCandidatesByJobId(filteredJobs, allCandidates),
+    [filteredJobs, allCandidates]
+  );
 
   const matchingCounts = useMemo(() => {
     const out = {};
@@ -526,16 +545,50 @@ export default function AdminRequirements() {
     setCandidateModalJob(job);
     setCandidateModalMode(mode);
     setCandidateModalSearch('');
+    setExpandedCandidateId(null);
+    setSelectedCandidateDetails(null);
+    setJobCandidates([]);
 
     if (mode === 'matching') {
-      setIsLoadingJobCandidates(false);
-      setJobCandidates(
-        (matchingCandidatesByJobId[job.id] || []).map((c) => ({
-          id: c._id || c.id,
-          status: Array.isArray(c.status) ? c.status[0] : c.status,
-          candidate: c,
-        }))
-      );
+      setIsLoadingJobCandidates(true);
+      try {
+        const candidatesToScore = matchingCandidatesByJobId[job.id] || [];
+        if (candidatesToScore.length === 0) {
+          setJobCandidates([]);
+          setIsLoadingJobCandidates(false);
+          return;
+        }
+
+        const headers = await getAuthHeader();
+        const scoreRes = await fetch(`${API_URL}/score-match/bulk`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            requirementId: job.id,
+            candidateIds: candidatesToScore.map(c => c._id || c.id),
+          })
+        });
+        const scorePayload = await scoreRes.json();
+        if (!scoreRes.ok) throw new Error(scorePayload.message || 'Failed to score candidates');
+
+        const candidatesById = new Map(candidatesToScore.map(c => [(c._id || c.id)?.toString(), c]));
+        const candidatesWithScores = (scorePayload.scores || []).map((scoreData) => {
+          const c = candidatesById.get(scoreData.candidateId?.toString());
+          if (!c) return null;
+          return {
+            id: c._id || c.id,
+            status: Array.isArray(c.status) ? c.status[0] : c.status,
+            candidate: c,
+            scoreData
+          };
+        }).filter(Boolean);
+        
+        setJobCandidates(candidatesWithScores);
+      } catch (err) {
+        toast({ title: 'Error', description: 'Failed to score candidates', variant: 'destructive' });
+      } finally {
+        setIsLoadingJobCandidates(false);
+      }
       return;
     }
 
@@ -764,14 +817,14 @@ export default function AdminRequirements() {
                     )}
                     {!isHidden('skills') && (
                       <div className="md:col-span-2">
-                        <label className="block text-xs font-semibold text-zinc-500 mb-1.5">Skills <span className="text-red-500">*</span></label>
+                        <label className="block text-xs font-semibold text-zinc-500 mb-1.5">Mandatory Skills <span className="text-red-500">*</span></label>
                         <div className={`min-h-[42px] flex flex-wrap items-center gap-2 rounded-lg border bg-white px-2 py-1.5 text-sm dark:bg-zinc-900 ${errors.skills ? "border-red-500 focus-within:ring-red-500" : "border-zinc-300 dark:border-zinc-700 focus-within:ring-zinc-500"} focus-within:ring-2`}>
                           {skillBadges.map(skill => (
                             <span key={skill} className="inline-flex max-w-full items-center gap-1 rounded-md border border-zinc-200 bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
                               <span className="truncate">{skill}</span>
                               <button
                                 type="button"
-                                onClick={() => removeSkill(skill)}
+                                onClick={() => removeSkill(skill, 'mandatorySkills')}
                                 className="rounded-full p-0.5 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"
                                 title={`Remove ${skill}`}
                               >
@@ -782,14 +835,43 @@ export default function AdminRequirements() {
                           <input
                             value={skillInput}
                             onChange={e => setSkillInput(e.target.value)}
-                            onKeyDown={handleSkillKeyDown}
-                            onPaste={handleSkillPaste}
-                            onBlur={() => addSkillsFromText(skillInput)}
+                            onKeyDown={e => handleSkillKeyDown(e, 'mandatorySkills')}
+                            onPaste={e => handleSkillPaste(e, 'mandatorySkills')}
+                            onBlur={() => addSkillsFromText(skillInput, 'mandatorySkills')}
                             placeholder={skillBadges.length ? "Add skill..." : "Type a skill and press Enter"}
                             className="min-w-[140px] flex-1 border-0 bg-transparent px-1 py-1 text-sm outline-none placeholder-zinc-400 dark:text-zinc-100"
                           />
                         </div>
                         {errors.skills && <p className="text-xs text-red-500 mt-1">{errors.skills}</p>}
+                      </div>
+                    )}
+                    {!isHidden('skills') && (
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-semibold text-zinc-500 mb-1.5">Preferred Skills</label>
+                        <div className="min-h-[42px] flex flex-wrap items-center gap-2 rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900 focus-within:ring-2 focus-within:ring-zinc-500">
+                          {preferredSkillBadges.map(skill => (
+                            <span key={skill} className="inline-flex max-w-full items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-300">
+                              <span className="truncate">{skill}</span>
+                              <button
+                                type="button"
+                                onClick={() => removeSkill(skill, 'preferredSkills')}
+                                className="rounded-full p-0.5 text-blue-400 hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900/40 dark:hover:text-blue-200"
+                                title={`Remove ${skill}`}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                          ))}
+                          <input
+                            value={preferredSkillInput}
+                            onChange={e => setPreferredSkillInput(e.target.value)}
+                            onKeyDown={e => handleSkillKeyDown(e, 'preferredSkills')}
+                            onPaste={e => handleSkillPaste(e, 'preferredSkills')}
+                            onBlur={() => addSkillsFromText(preferredSkillInput, 'preferredSkills')}
+                            placeholder={preferredSkillBadges.length ? "Add preferred skill..." : "Type a preferred skill and press Enter"}
+                            className="min-w-[180px] flex-1 border-0 bg-transparent px-1 py-1 text-sm outline-none placeholder-zinc-400 dark:text-zinc-100"
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -850,14 +932,26 @@ export default function AdminRequirements() {
         )}
 
         {/* ── Filters ── */}
-        <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col sm:flex-row gap-4 items-center">
-          <div className="w-full sm:flex-1">
+        <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col sm:flex-row gap-4 items-center flex-wrap">
+          <div className="w-full sm:flex-1 min-w-[200px]">
             <input placeholder="Search by Role, Job Code, or Company..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className={inputCls} />
           </div>
-          <div className="w-full sm:w-64">
+          <div className="w-full sm:w-48">
+            <select value={selectedLocationFilter} onChange={e => setSelectedLocationFilter(e.target.value)} className={inputCls}>
+              <option value="">All Locations</option>
+              {uniqueLocations.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+            </select>
+          </div>
+          <div className="w-full sm:w-48">
             <select value={selectedClientFilter} onChange={e => setSelectedClientFilter(e.target.value)} className={inputCls}>
-              <option value="">All Clients</option>
-              {clients.map(c => <option key={c.id} value={c.companyName}>{c.companyName}</option>)}
+              <option value="">All Companies</option>
+              {uniqueClients.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="w-full sm:w-48">
+            <select value={selectedStatusFilter} onChange={e => setSelectedStatusFilter(e.target.value)} className={inputCls}>
+              <option value="">All Status</option>
+              {uniqueStatuses.map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
         </div>
@@ -884,10 +978,7 @@ export default function AdminRequirements() {
             </div>
           ) : (
             <>
-              <div ref={topScrollRef} onScroll={handleTopScroll} className="tbl-scroll overflow-x-auto overflow-y-hidden border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 z-20 sticky top-0 rounded-t-xl" style={{ height: '18px' }}>
-                <div style={{ width: scrollWidth, height: '1px' }} />
-              </div>
-              <div ref={bottomScrollRef} onScroll={handleBottomScroll} className="no-scrollbar max-h-[calc(100vh-16rem)] min-h-[400px] overflow-auto rounded-b-xl w-full">
+              <div className="tbl-scroll max-h-[calc(100vh-16rem)] min-h-[400px] overflow-auto rounded-xl w-full">
                 <table ref={tableRef} className="min-w-[1500px] w-full text-left text-sm whitespace-nowrap border-collapse">
                   <thead className="bg-zinc-50 dark:bg-zinc-900/80 text-xs uppercase text-zinc-500 font-semibold tracking-wider sticky top-0 z-10 shadow-[0_1px_0_0_#e4e4e7] dark:shadow-[0_1px_0_0_#27272a]">
                     <tr>
@@ -1011,8 +1102,8 @@ export default function AdminRequirements() {
       )}
 
       {candidateModalJob && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setCandidateModalJob(null)}>
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col border border-zinc-200 dark:border-zinc-800 overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => { setSelectedCandidateDetails(null); setCandidateModalJob(null); }}>
+          <div className={`bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full ${candidateModalMode === 'matching' ? 'max-w-6xl' : 'max-w-4xl'} max-h-[90vh] flex flex-col border border-zinc-200 dark:border-zinc-800 overflow-hidden`} onClick={e => e.stopPropagation()}>
             <div className="px-6 py-4 bg-gradient-to-r from-zinc-900 to-zinc-800 dark:from-zinc-950 dark:to-zinc-900 flex items-center justify-between shrink-0">
               <div>
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
@@ -1021,7 +1112,7 @@ export default function AdminRequirements() {
                 </h2>
                 <p className="text-xs text-zinc-400 mt-0.5">{candidateModalJob.position} • {candidateModalJob.jobCode}</p>
               </div>
-              <button onClick={() => setCandidateModalJob(null)} className="p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-700 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
+              <button onClick={() => { setSelectedCandidateDetails(null); setCandidateModalJob(null); }} className="p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-700 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-6">
               <div className="mb-4 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
@@ -1049,37 +1140,126 @@ export default function AdminRequirements() {
                   <table className="min-w-[980px] w-full text-left text-sm">
                     <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-xs uppercase text-zinc-500 font-semibold">
                       <tr>
+                        <th className="px-4 py-3">Avatar</th>
                         <th className="px-4 py-3">Name</th>
-                        <th className="px-4 py-3">Role</th>
-                        <th className="px-4 py-3">Skills</th>
-                        <th className="px-4 py-3">Experience</th>
-                        <th className="px-4 py-3">Status</th>
-                        <th className="px-4 py-3">Recruiter</th>
+                        <th className="px-4 py-3">Current Role</th>
+                        {candidateModalMode === 'matching' && (
+                          <>
+                            <th className="px-4 py-3 text-center">Match Score</th>
+                            <th className="px-4 py-3">Match Level</th>
+                            <th className="px-4 py-3"></th>
+                          </>
+                        )}
+                        {candidateModalMode !== 'matching' && (
+                          <>
+                            <th className="px-4 py-3">Skills</th>
+                            <th className="px-4 py-3">Experience</th>
+                            <th className="px-4 py-3">Status</th>
+                            <th className="px-4 py-3">Recruiter</th>
+                          </>
+                        )}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                      {displayCandidates.map(({ id, status, candidate }) => {
+                      {displayCandidates.map(({ id, status, candidate, scoreData }) => {
                         const name = candidate.name || `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || 'Unnamed Candidate';
                         const skills = Array.isArray(candidate.skills) ? candidate.skills : (typeof candidate.skills === 'string' ? candidate.skills.split(',') : []);
                         const exp = candidate.totalExperience || candidate.relevantExperience || candidate.experience || '';
+                        const avatarLetter = name.charAt(0).toUpperCase();
+                        const isExpanded = expandedCandidateId === id;
+
                         return (
-                          <tr key={id} className="bg-white dark:bg-zinc-900">
-                            <td className="px-4 py-3">
-                              <div className="font-semibold text-zinc-900 dark:text-zinc-100">{name}</div>
-                              <div className="text-xs text-zinc-400">{candidate.candidateId || candidate._id?.slice(-6).toUpperCase()}</div>
-                            </td>
-                            <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{candidate.position || '—'}</td>
-                            <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
-                              <div className="max-w-[360px] truncate" title={skills.filter(Boolean).join(', ')}>
-                                {skills.filter(Boolean).join(', ') || '—'}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{exp || '—'}</td>
-                            <td className="px-4 py-3">
-                              <span className="inline-flex rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{status || 'Submitted'}</span>
-                            </td>
-                            <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{candidate.recruiterName || 'Unassigned'}</td>
-                          </tr>
+                          <React.Fragment key={id}>
+                            <tr className={`bg-white dark:bg-zinc-900 transition-colors ${isExpanded ? 'bg-zinc-50 dark:bg-zinc-800/40' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/20'}`}>
+                              <td className="px-4 py-3 w-12">
+                                <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 flex items-center justify-center font-bold text-xs">{avatarLetter}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                {candidateModalMode === 'matching' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedCandidateDetails({ candidate, status, clientName: candidate.clientName || candidateModalJob.clientName })}
+                                    className="text-left font-semibold text-blue-700 underline-offset-2 hover:underline dark:text-blue-400"
+                                  >
+                                    {name}
+                                  </button>
+                                ) : (
+                                  <div className="font-semibold text-zinc-900 dark:text-zinc-100">{name}</div>
+                                )}
+                                <div className="text-xs text-zinc-400">{candidate.candidateId || candidate._id?.slice(-6).toUpperCase()}</div>
+                              </td>
+                              <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{candidate.position || '—'}</td>
+                              
+                              {candidateModalMode === 'matching' && (
+                                <>
+                                  <td className="px-4 py-3 text-center">
+                                    <ScoreBadge score={getScoreValue(scoreData)} />
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    {scoreData?.matchLevel && (
+                                      <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold border ${getMatchLevelClass(scoreData.matchLevel, true)}`}>
+                                        {scoreData.matchLevel}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    {scoreData && (
+                                      <button 
+                                        onClick={() => setExpandedCandidateId(isExpanded ? null : id)}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 transition-colors"
+                                      >
+                                        {isExpanded ? 'Hide Breakdown' : 'View Breakdown'}
+                                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                      </button>
+                                    )}
+                                  </td>
+                                </>
+                              )}
+
+                              {candidateModalMode !== 'matching' && (
+                                <>
+                                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                                    <div className="max-w-[360px] truncate" title={skills.filter(Boolean).join(', ')}>
+                                      {skills.filter(Boolean).join(', ') || '—'}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{exp || '—'}</td>
+                                  <td className="px-4 py-3">
+                                    <span className="inline-flex rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{status || 'Submitted'}</span>
+                                  </td>
+                                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{candidate.recruiterName || 'Unassigned'}</td>
+                                </>
+                              )}
+                            </tr>
+                            
+                            {/* Expanded Breakdown Row */}
+                            {isExpanded && scoreData && (
+                              <tr className="bg-zinc-50/80 dark:bg-zinc-900/50 border-t-0">
+                                <td colSpan={6} className="px-6 py-5">
+                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                    <div>
+                                      <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                                        Score Breakdown
+                                        <span className="text-xs font-normal text-zinc-500">(Out of 100)</span>
+                                      </h4>
+                                      <MatchBreakdownBar breakdown={scoreData.breakdown} />
+                                    </div>
+                                    <div className="space-y-4">
+                                      <MatchReasonBox reason={scoreData.reason} flags={scoreData.atsFlags} />
+                                      <SkillChips
+                                        matched={scoreData.matchedSkills}
+                                        missing={scoreData.missingSkills}
+                                        matchedMandatory={scoreData.matchedMandatorySkills}
+                                        missingMandatory={scoreData.missingMandatorySkills}
+                                        matchedPreferred={scoreData.matchedPreferredSkills}
+                                        missingPreferred={scoreData.missingPreferredSkills}
+                                      />
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>
@@ -1092,6 +1272,16 @@ export default function AdminRequirements() {
       )}
 
       {/* ── Job Description Modal ── */}
+      {selectedCandidateDetails && (
+        <CandidateDetailsModal
+          candidate={selectedCandidateDetails.candidate}
+          status={selectedCandidateDetails.status}
+          clientName={selectedCandidateDetails.clientName}
+          baseUrl={BASE_URL}
+          onClose={() => setSelectedCandidateDetails(null)}
+        />
+      )}
+
       {isJDModalOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setIsJDModalOpen(false)}>
           <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col border border-zinc-200 dark:border-zinc-800 overflow-hidden" onClick={e => e.stopPropagation()}>

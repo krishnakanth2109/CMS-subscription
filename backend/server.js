@@ -26,6 +26,7 @@ import channelRoutes   from './routes/channelRoutes.js';
 import aiMockRoutes    from './routes/aiMockRoutes.js';
 import paymentRoutes   from './routes/paymentRoutes.js';   // 🔹 NEW
 import submissionRoutes from './routes/submissionRoutes.js';
+import scoreMatchRoutes from './routes/scoreMatch.routes.js';
 
 
 // ── Agreement Module ──────────────────────────────────────────────────────────
@@ -128,6 +129,15 @@ io.on('connection', (socket) => {
   socket.on('channel_updated', (channel) => socket.broadcast.emit('channel_updated', channel));
   socket.on('channel_deleted', (payload) => socket.broadcast.emit('channel_deleted', payload));
 
+  // ── Edit events — relay to all room members except the sender ──────────────
+  socket.on('channel_message_edited', (data) => {
+    if (data.channelId) socket.to(`channel_${data.channelId}`).emit('channel_message_edited', data);
+  });
+
+  socket.on('dm_message_edited', (data) => {
+    if (data.to) socket.to(data.to).emit('dm_message_edited', data);
+  });
+
   socket.on('disconnect', () => console.log(`⚡ Socket Disconnected: ${socket.id}`));
 });
 
@@ -145,6 +155,7 @@ app.use('/api/channels',   channelRoutes);
 app.use('/api/ai-mock',    aiMockRoutes);
 app.use('/api/payments',   paymentRoutes);
 app.use('/api/submissions', submissionRoutes);
+app.use('/api/score-match', scoreMatchRoutes);
 
 
 // Agreement module

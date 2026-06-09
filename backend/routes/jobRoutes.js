@@ -35,6 +35,35 @@ const cleanJobDescriptionText = (text = '') => String(text)
   .join('\n')
   .trim();
 
+const parseSkillList = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((skill) => String(skill).trim()).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value.split(/[,;\n]+/).map((skill) => skill.trim()).filter(Boolean);
+  }
+  return [];
+};
+
+const prepareJobPayload = (payload = {}) => {
+  const next = { ...payload };
+  const hasSkillPayload = ['skills', 'mandatorySkills', 'preferredSkills'].some((key) =>
+    Object.prototype.hasOwnProperty.call(next, key)
+  );
+  if (!hasSkillPayload) return next;
+
+  const mandatorySkills = parseSkillList(next.mandatorySkills);
+  const legacySkills = parseSkillList(next.skills);
+  const preferredSkills = parseSkillList(next.preferredSkills);
+  const effectiveMandatorySkills = mandatorySkills.length ? mandatorySkills : legacySkills;
+
+  next.mandatorySkills = effectiveMandatorySkills;
+  next.preferredSkills = preferredSkills;
+  next.skills = effectiveMandatorySkills.join(', ');
+
+  return next;
+};
+
 router.post('/import-jd', (req, res) => {
   upload.single('file')(req, res, async (uploadError) => {
     if (uploadError) {
@@ -146,7 +175,7 @@ router.post('/', async (req, res) => {
     //   tenantOwnerId,
     //   createdBy: req.user._id,
     // });
-    const jobData = { ...req.body, createdBy: req.user._id, tenantOwnerId };
+    const jobData = prepareJobPayload({ ...req.body, createdBy: req.user._id, tenantOwnerId });
 
     if (!jobData.tatTime || jobData.tatTime === '') jobData.tatTime = null;
 
@@ -181,7 +210,7 @@ router.put('/:id', async (req, res) => {
     }
 
     const tenantOwnerId = getTenantOwnerId(req.user);
-    const updateData = { ...req.body };
+    const updateData = prepareJobPayload(req.body);
     if (updateData.tatTime === '') updateData.tatTime = null;
     delete updateData.tenantOwnerId; // never allow tenant hop
 

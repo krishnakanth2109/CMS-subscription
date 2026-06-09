@@ -11,6 +11,7 @@ import {
   Settings2, CheckCircle2, ChevronDown, ChevronUp, GripVertical, ToggleLeft, ToggleRight, Info, Pencil
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { ScoreBadge, MatchBreakdownBar, SkillChips, MatchReasonBox, getScoreValue, getMatchLevelClass } from '@/components/Score/ScoreComponents';
 
 // ── Inline Excel Import Logic ─────────────────────────────────────────────────
 const _FIELD_ALIASES = {
@@ -186,6 +187,8 @@ const downloadCandidateTemplate = () => {
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
 const API_URL = `${BASE_URL}/api`;
 
+const parseSearchTerms = (searchText) =>
+  [...new Set(searchText.toLowerCase().split(/[,\s]+/).map(term => term.trim()).filter(Boolean))];
 
 const STATUS_FLOW_ORDER = [
   'Pipeline', 'Submitted', 'Shared Profiles', 'Yet to attend', 'Turnups',
@@ -540,6 +543,9 @@ export default function RecruiterCandidates() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [candidateScoreData, setCandidateScoreData] = useState(null);
+  const [isScoringCandidate, setIsScoringCandidate] = useState(false);
+  const [scoreExpanded, setScoreExpanded] = useState(false);
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -987,15 +993,18 @@ export default function RecruiterCandidates() {
 
   const getFilteredCandidates = useMemo(() => {
     const todayLocal = new Date().toLocaleDateString('en-CA');
+    const roleSearch = roleSearchTerm.toLowerCase();
+    const roleSearchTerms = parseSearchTerms(roleSearchTerm);
     return candidates.filter(c => {
       const searchMatch =
         c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.candidateId?.toLowerCase().includes(searchTerm.toLowerCase());
       
+      const skillText = (Array.isArray(c.skills) ? c.skills.join(' ') : c.skills || '').toLowerCase();
       const roleMatch = !roleSearchTerm || 
-        (c.position && c.position.toLowerCase().includes(roleSearchTerm.toLowerCase())) ||
-        (Array.isArray(c.skills) && c.skills.some(skill => skill.toLowerCase().includes(roleSearchTerm.toLowerCase())));
+        (c.position && c.position.toLowerCase().includes(roleSearch)) ||
+        roleSearchTerms.every(term => skillText.includes(term));
         
       const currentStatusArr = Array.isArray(c.status) ? c.status : [c.status || ''];
 
@@ -1070,6 +1079,7 @@ export default function RecruiterCandidates() {
   const openViewDialog = async (c) => {
     setViewingCandidate(c);
     setIsViewDialogOpen(true);
+    setCandidateScoreData(null);
     try {
       const authH = await authHeaders();
       const res = await fetch(`${API_URL}/candidates/${c._id}`, { headers: { ...authH } });
@@ -1167,48 +1177,54 @@ export default function RecruiterCandidates() {
     }
   };
 
+  const setEditFormFromCandidate = (candidate) => {
+    const isStandard = standardSources.includes(candidate.source || 'Portal');
+    setIsCustomSource(!isStandard);
+    setFormData({
+      firstName: candidate.firstName || '', lastName: candidate.lastName || '', email: candidate.email || '', contact: candidate.contact || '', alternateNumber: candidate.alternateNumber || '',
+      dateOfBirth: candidate.dateOfBirth ? new Date(candidate.dateOfBirth).toISOString().split('T')[0] : '',
+      gender: candidate.gender || '', linkedin: candidate.linkedin || '',
+      currentLocation: candidate.currentLocation || '', preferredLocation: candidate.preferredLocation || '',
+      position: candidate.position || '', client: candidate.client || '', industry: candidate.industry || '',
+      currentCompany: candidate.currentCompany || '', skills: Array.isArray(candidate.skills) ? candidate.skills.join(', ') : candidate.skills || '',
+      totalExperience: candidate.totalExperience ? String(candidate.totalExperience) : '',
+      clientCandidateId: candidate.clientCandidateId || '',
+      totalExperienceYears: (candidate.totalExperience || '').split('yrs')[0]?.trim() || '0',
+      totalExperienceMonths: (candidate.totalExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
+      relevantExperience: candidate.relevantExperience ? String(candidate.relevantExperience) : '',
+      relevantExperienceYears: (candidate.relevantExperience || '').split('yrs')[0]?.trim() || '0',
+      relevantExperienceMonths: (candidate.relevantExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
+      education: candidate.education || '', ctc: candidate.ctc ? String(candidate.ctc) : '', ectc: candidate.ectc ? String(candidate.ectc) : '',
+      currentTakeHome: candidate.currentTakeHome || '', expectedTakeHome: candidate.expectedTakeHome || '',
+      noticePeriod: candidate.noticePeriod ? String(candidate.noticePeriod) : '', servingNoticePeriod: candidate.servingNoticePeriod ? 'true' : 'false',
+      lwd: candidate.lwd ? new Date(candidate.lwd).toISOString().split('T')[0] : '', reasonForChange: candidate.reasonForChange || '',
+      offersInHand: candidate.offersInHand ? 'true' : 'false', offerPackage: candidate.offerPackage || '',
+      source: candidate.source || 'Portal', status: (() => {
+        if (Array.isArray(candidate.status)) return candidate.status;
+        if (typeof candidate.status === 'string') return candidate.status.split(',').map(s => s.trim()).filter(Boolean);
+        return [candidate.status || 'Submitted'];
+      })(),
+      rating: candidate.rating?.toString() || '0', assignedJobId: typeof candidate.assignedJobId === 'object' ? candidate.assignedJobId._id : candidate.assignedJobId || '',
+      dateAdded: candidate.dateAdded ? new Date(candidate.dateAdded).toISOString().split('T')[0] : '',
+      notes: candidate.notes || '', remarks: candidate.remarks || '', active: candidate.active !== false,
+      customFields: candidate.customFields || {}
+    });
+  };
+
   const openEditDialog = async (c) => {
     setErrors({}); setSelectedCandidateId(c._id);
     setSelectedDeliverClientId('');
     setViewingCandidate(c);
-    const isStandard = standardSources.includes(c.source || 'Portal');
-    setIsCustomSource(!isStandard);
-    setFormData({
-      firstName: c.firstName || '', lastName: c.lastName || '', email: c.email || '', contact: c.contact || '', alternateNumber: c.alternateNumber || '',
-      dateOfBirth: c.dateOfBirth ? new Date(c.dateOfBirth).toISOString().split('T')[0] : '',
-      gender: c.gender || '', linkedin: c.linkedin || '',
-      currentLocation: c.currentLocation || '', preferredLocation: c.preferredLocation || '',
-      position: c.position || '', client: c.client || '', industry: c.industry || '',
-      currentCompany: c.currentCompany || '', skills: Array.isArray(c.skills) ? c.skills.join(', ') : c.skills || '',
-      totalExperience: c.totalExperience ? String(c.totalExperience) : '',
-      clientCandidateId: c.clientCandidateId || '',
-      totalExperienceYears: (c.totalExperience || '').split('yrs')[0]?.trim() || '0',
-      totalExperienceMonths: (c.totalExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
-      relevantExperience: c.relevantExperience ? String(c.relevantExperience) : '',
-      relevantExperienceYears: (c.relevantExperience || '').split('yrs')[0]?.trim() || '0',
-      relevantExperienceMonths: (c.relevantExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
-      education: c.education || '', ctc: c.ctc ? String(c.ctc) : '', ectc: c.ectc ? String(c.ectc) : '',
-      currentTakeHome: c.currentTakeHome || '', expectedTakeHome: c.expectedTakeHome || '',
-      noticePeriod: c.noticePeriod ? String(c.noticePeriod) : '', servingNoticePeriod: c.servingNoticePeriod ? 'true' : 'false',
-      lwd: c.lwd ? new Date(c.lwd).toISOString().split('T')[0] : '', reasonForChange: c.reasonForChange || '',
-      offersInHand: c.offersInHand ? 'true' : 'false', offerPackage: c.offerPackage || '',
-      source: c.source || 'Portal', status: (() => {
-        if (Array.isArray(c.status)) return c.status;
-        if (typeof c.status === 'string') return c.status.split(',').map(s => s.trim()).filter(Boolean);
-        return [c.status || 'Submitted'];
-      })(),
-      rating: c.rating?.toString() || '0', assignedJobId: typeof c.assignedJobId === 'object' ? c.assignedJobId._id : c.assignedJobId || '',
-      dateAdded: c.dateAdded ? new Date(c.dateAdded).toISOString().split('T')[0] : '',
-      notes: c.notes || '', remarks: c.remarks || '', active: c.active !== false,
-      customFields: c.customFields || {}
-    });
+    setEditFormFromCandidate(c);
     setIsEditDialogOpen(true);
 
     try {
       const authH = await authHeaders();
       const res = await fetch(`${API_URL}/candidates/${c._id}`, { headers: { ...authH } });
       if (res.ok) {
-        setViewingCandidate(await res.json());
+        const latestCandidate = await res.json();
+        setViewingCandidate(latestCandidate);
+        setEditFormFromCandidate(latestCandidate);
       }
     } catch (err) {
       console.error("Error loading details for edit modal:", err);
@@ -1930,7 +1946,7 @@ export default function RecruiterCandidates() {
                 </div>
                 <div className="relative w-full sm:max-w-sm">
                   <Briefcase className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <Input placeholder="Search job role or skills..." className="pl-10" value={roleSearchTerm} onChange={e => setRoleSearchTerm(e.target.value)} />
+                  <Input placeholder="Search by role or skills e.g. React, SQL, Java" className="pl-10" value={roleSearchTerm} onChange={e => setRoleSearchTerm(e.target.value)} />
                 </div>
               </div>
               <div className="flex gap-3">
@@ -1975,7 +1991,14 @@ export default function RecruiterCandidates() {
                           <td className="p-3 pl-4 whitespace-nowrap" onClick={e => e.stopPropagation()}><input type="checkbox" checked={selectedCandidates.includes(c._id)} onChange={() => toggleSelectCandidate(c._id)} className="h-4 w-4 rounded" /></td>
                           <td className="p-3 font-mono text-xs text-blue-600 font-bold cursor-pointer whitespace-nowrap" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(getCandidateId(c)); toast({ title: "Copied ID" }); }}>{getCandidateId(c)}</td>
                           <td className="p-3">
-                            <span className="font-semibold text-slate-900">{c.name}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openViewDialog(c); }}
+                              className="text-left font-semibold text-slate-900 hover:text-blue-700 hover:underline underline-offset-2 transition-colors"
+                              title="View Candidate"
+                            >
+                              {c.name}
+                            </button>
                           </td>
                           <td className="p-3 text-sm text-slate-600 whitespace-nowrap">
                             <div className="flex items-center gap-2">{c.contact}
@@ -2390,10 +2413,70 @@ export default function RecruiterCandidates() {
                   </div>
                 </div>
               </div>
-              <button onClick={() => setIsViewDialogOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
-                <X className="h-6 w-6" />
-              </button>
+              <div className="flex items-center gap-4">
+                {viewingCandidate.requirementId && (
+                  <button 
+                    onClick={async () => {
+                      setIsScoringCandidate(true);
+                      setCandidateScoreData(null);
+                      try {
+                        const headers = await authHeaders();
+                        const res = await fetch(`${API_URL}/score-match`, {
+                          method: 'POST',
+                          headers: { ...headers, 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ candidateId: viewingCandidate._id, requirementId: viewingCandidate.requirementId })
+                        });
+                        if (res.ok) {
+                          setCandidateScoreData(await res.json());
+                          setScoreExpanded(true);
+                        }
+                      } catch(e) {} finally { setIsScoringCandidate(false); }
+                    }}
+                    disabled={isScoringCandidate}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-sm font-semibold transition"
+                  >
+                    {isScoringCandidate ? <><Loader2 className="w-4 h-4 animate-spin"/> Scoring...</> : 'Score Candidate'}
+                  </button>
+                )}
+                <button onClick={() => setIsViewDialogOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
             </div>
+            
+            {candidateScoreData && (
+              <div className="border-b border-slate-200 bg-white">
+                <div 
+                  className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition"
+                  onClick={() => setScoreExpanded(!scoreExpanded)}
+                >
+                  <div className="flex items-center gap-4">
+                    <ScoreBadge score={getScoreValue(candidateScoreData)} />
+                    <div>
+                      <h3 className="font-bold text-slate-900">Score Match</h3>
+                      <span className={`inline-flex items-center px-2 py-0.5 mt-1 rounded text-xs font-semibold border ${getMatchLevelClass(candidateScoreData.matchLevel)}`}>
+                        {candidateScoreData.matchLevel}
+                      </span>
+                    </div>
+                  </div>
+                  {scoreExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                </div>
+                {scoreExpanded && (
+                  <div className="px-6 pb-6 pt-2 bg-slate-50/50 border-t border-slate-100">
+                    <MatchBreakdownBar breakdown={candidateScoreData.breakdown} />
+                    <MatchReasonBox reason={candidateScoreData.reason} flags={candidateScoreData.atsFlags} />
+                    <SkillChips
+                      matched={candidateScoreData.matchedSkills}
+                      missing={candidateScoreData.missingSkills}
+                      matchedMandatory={candidateScoreData.matchedMandatorySkills}
+                      missingMandatory={candidateScoreData.missingMandatorySkills}
+                      matchedPreferred={candidateScoreData.matchedPreferredSkills}
+                      missingPreferred={candidateScoreData.missingPreferredSkills}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </ModalHeader>
           <ModalBody>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50/50 p-2 rounded-xl">

@@ -15,7 +15,10 @@ import { useAuth } from "@/context/AuthContext";
 
 
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000')
+  .replace(/\/$/, '')
+  .replace(/\/api$/, '');
+const API_URL = `${BASE_URL}/api`;
 
 // --- Helpers ---
 function getStatusBadge(status) {
@@ -108,7 +111,7 @@ export default function RecruiterSchedules() {
       const [resInterviews, resCandidates, resRecruiters] = await Promise.all([
         fetch(`${API_URL}/interviews`, { headers }),
         fetch(`${API_URL}/candidates`, { headers }),
-        fetch(`${API_URL}/users/active-list`, { headers })
+        fetch(`${API_URL}/recruiters/by-role?role=recruiter`, { headers })
       ]);
 
       if (resInterviews.ok) {

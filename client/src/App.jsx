@@ -36,6 +36,7 @@ const AdminSettings = lazy(() => import('@/pages/AdminSettings'));
 const AgreementGenerator = lazy(() => import('@/pages/AgreementGenerator'));
 const MockInterviewsDashboard = lazy(() => import('@/pages/MockInterviewsDashboard'));
 const InterviewSession = lazy(() => import('@/pages/InterviewSession'));
+const UserGuidePage = lazy(() => import('@/pages/UserGuidePage'));
 
 // Manager Specific Pages
 const ManagerDashboard = lazy(() => import('@/pages/ManagerDashboard'));
@@ -91,6 +92,13 @@ function AppRoutes() {
         <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/invite" element={<InterviewSession />} />
+        <Route path="/user-guide" element={
+          <ProtectedRoute allowedRoles={['admin', 'manager', 'recruiter']}>
+            <DashboardLayout />
+          </ProtectedRoute>
+        }>
+          <Route index element={<UserGuidePage />} />
+        </Route>
 
         {/* ===================== MASTER ROUTES ===================== */}
         {/* URL: /master is strictly the login form */}

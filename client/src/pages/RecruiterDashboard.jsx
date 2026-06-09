@@ -92,10 +92,11 @@ export default function RecruiterDashboard() {
       try {
         const headers = await getAuthHeader();
 
-        const [candRes, jobRes, intRes] = await Promise.allSettled([
+        const [candRes, jobRes, intRes, subRes] = await Promise.allSettled([
           fetch(`${API_URL}/candidates`, { headers }),
           fetch(`${API_URL}/jobs`, { headers }),
           fetch(`${API_URL}/interviews`, { headers }),
+          fetch(`${API_URL}/submissions`, { headers }),
         ]);
 
         if (cancelled) return;
@@ -103,19 +104,39 @@ export default function RecruiterDashboard() {
         const currentUserId = user._id || user.id;
         const currentUserName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || '';
 
+        // ── Get Recent Clients from Submissions ──
+        let latestClients = {};
+        if (subRes.status === 'fulfilled' && subRes.value.ok) {
+          const rawSubs = await subRes.value.json();
+          // Sort ascending so the last one in the loop is the most recent
+          const arr = Array.isArray(rawSubs) ? rawSubs : [];
+          arr.sort((a, b) => new Date(a.createdAt || a.dateAdded) - new Date(b.createdAt || b.dateAdded));
+          arr.forEach(sub => {
+            if (sub.candidateId && sub.clientName) {
+              const cId = typeof sub.candidateId === 'object' ? sub.candidateId._id || sub.candidateId.id : sub.candidateId;
+              latestClients[cId] = sub.clientName;
+            }
+          });
+        }
+
         // ── Candidates ──
         if (candRes.status === 'fulfilled' && candRes.value.ok) {
           const raw = await candRes.value.json();
-          setCandidates(raw.map(c => ({
-            id: c._id || c.id,
-            name: c.name || 'Unknown',
-            email: c.email || 'N/A',
-            position: c.position || 'N/A',
-            status: c.status || 'Submitted',
-            recruiterId: c.recruiterId?._id || c.recruiterId,
-            createdAt: c.createdAt,
-            client: c.client?.name || c.client?.companyName || (typeof c.client === 'string' ? c.client : c.currentCompany) || 'N/A',
-          })));
+          setCandidates(raw.map(c => {
+            const id = c._id || c.id;
+            const recentClient = latestClients[id];
+            
+            return {
+              id,
+              name: c.name || 'Unknown',
+              email: c.email || 'N/A',
+              position: c.position || 'N/A',
+              status: Array.isArray(c.status) ? c.status[c.status.length - 1] : (c.status || 'Submitted'),
+              recruiterId: c.recruiterId?._id || c.recruiterId,
+              createdAt: c.createdAt,
+              client: recentClient || (c.client?.name || c.client?.companyName || (typeof c.client === 'string' ? c.client : c.currentCompany) || 'N/A'),
+            };
+          }));
         }
 
         // ── Jobs (filtered to current recruiter) ──

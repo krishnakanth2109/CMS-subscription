@@ -3,7 +3,7 @@ import {
   Send, Search, Plus, X, Check, Reply, Trash2, Smile,
   Hash, Lock, Megaphone, Users, Settings, ChevronDown, ChevronRight,
   Edit2, MessageSquare, Shield, Crown, Loader2, AlertCircle, Pin,
-  MessageCircle, AtSign
+  MessageCircle, AtSign, Paperclip, Download, FileText, Film, Image
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import io from 'socket.io-client';
@@ -19,6 +19,69 @@ const getAuthHeader = () => {
     const t = s ? JSON.parse(s)?.idToken : null;
     return { Authorization: `Bearer ${t || ''}`, 'Content-Type': 'application/json' };
   } catch { return { 'Content-Type': 'application/json' }; }
+};
+
+// Auth header without Content-Type (for FormData uploads)
+const getAuthHeaderForm = () => {
+  try {
+    const s = sessionStorage.getItem('currentUser');
+    const t = s ? JSON.parse(s)?.idToken : null;
+    return { Authorization: `Bearer ${t || ''}` };
+  } catch { return {}; }
+};
+
+// ── Attachment helpers ─────────────────────────────────────────────────────────
+const isImage = (type = '') => type.startsWith('image/');
+const isVideo = (type = '') => type.startsWith('video/');
+const fmtBytes = (b = 0) => b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`;
+
+// ── AttachmentDisplay — renders inside a chat message ─────────────────────────
+const AttachmentDisplay = ({ attachment }) => {
+  if (!attachment?.url) return null;
+  // Cloudinary URLs are absolute; legacy disk URLs start with /uploads
+  const src = attachment.url.startsWith('http') ? attachment.url : `${BASE_URL}${attachment.url}`;
+  const { fileName, fileType, fileSize } = attachment;
+
+  if (isImage(fileType)) {
+    return (
+      <div className="mt-1.5 max-w-xs">
+        <a href={src} target="_blank" rel="noreferrer">
+          <img src={src} alt={fileName} className="rounded-xl border border-slate-200 max-h-60 object-cover w-full cursor-zoom-in hover:opacity-90 transition-opacity" />
+        </a>
+        <a href={src} download={fileName}
+          className="flex items-center gap-1 mt-1 text-[11px] text-slate-400 hover:text-blue-600 transition-colors">
+          <Download className="w-3 h-3" /> {fileName}
+        </a>
+      </div>
+    );
+  }
+
+  if (isVideo(fileType)) {
+    return (
+      <div className="mt-1.5 max-w-xs">
+        <video src={src} controls className="rounded-xl border border-slate-200 max-h-52 w-full" />
+        <a href={src} download={fileName}
+          className="flex items-center gap-1 mt-1 text-[11px] text-slate-400 hover:text-blue-600 transition-colors">
+          <Download className="w-3 h-3" /> {fileName}
+        </a>
+      </div>
+    );
+  }
+
+  // Document / other
+  return (
+    <a href={src} target="_blank" rel="noreferrer" download={fileName}
+      className="mt-1.5 flex items-center gap-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl px-3 py-2.5 max-w-xs transition-colors group">
+      <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+        <FileText className="w-4 h-4 text-blue-600" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-slate-700 truncate">{fileName}</p>
+        {fileSize > 0 && <p className="text-[11px] text-slate-400">{fmtBytes(fileSize)}</p>}
+      </div>
+      <Download className="w-4 h-4 text-slate-400 group-hover:text-blue-600 flex-shrink-0 transition-colors" />
+    </a>
+  );
 };
 
 const getCurrentUser = () => {
@@ -345,16 +408,21 @@ export default function TeamsChat({ role: roleProp }) {
   const [showCreateModal,   setShowCreateModal]   = useState(false);
   const [editingChannel,    setEditingChannel]    = useState(null);
   const [showNewDM,         setShowNewDM]         = useState(false);
-  const [channelsPanelOpen, setChannelsPanelOpen] = useState(true);
-  const [dmsPanelOpen,      setDmsPanelOpen]      = useState(true);
+  const [activeTab,         setActiveTab]         = useState('chats');
 
   const [contextMenu,  setContextMenu]  = useState(null);
   const [deleteConfirm,setDeleteConfirm]= useState(null);
+  const [editingMsg,   setEditingMsg]   = useState(null);  // { id, content }
   const [showMembers,  setShowMembers]  = useState(false);
 
-  const socketRef  = useRef(null);
-  const bottomRef  = useRef(null);
-  const inputRef   = useRef(null);
+  const socketRef   = useRef(null);
+  const bottomRef   = useRef(null);
+  const inputRef    = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const [pendingFile,    setPendingFile]    = useState(null);  // { file, preview, uploading }
+  const [uploadError,    setUploadError]    = useState('');
+  const [deleteToast,    setDeleteToast]    = useState(false); // success toast after delete
 
   // ── Derived active objects ─────────────────────────────────────────────────
   const activeChannel = useMemo(
@@ -365,6 +433,13 @@ export default function TeamsChat({ role: roleProp }) {
     () => dms.find(d => d.id === activeDMId) || null,
     [dms, activeDMId]
   );
+
+  const activeChannelRef = useRef(activeChannelId);
+  const activeDMRef = useRef(activeDMId);
+  useEffect(() => {
+    activeChannelRef.current = activeChannelId;
+    activeDMRef.current = activeDMId;
+  }, [activeChannelId, activeDMId]);
 
   // ── Header info for current view ──────────────────────────────────────────
   const headerInfo = useMemo(() => {
@@ -394,12 +469,12 @@ export default function TeamsChat({ role: roleProp }) {
 
     // Channel messages
     socketRef.current.on('channel_message', (msg) => {
-      if (msg.channelId === activeChannelId) {
+      if (msg.channelId === activeChannelRef.current) {
         setMessages(prev => prev.find(m => m._id === msg._id) ? prev : [...prev, msg]);
       }
       setChannels(prev => prev.map(ch =>
         ch._id === msg.channelId
-          ? { ...ch, lastMessage: msg.content, lastMessageAt: msg.createdAt }
+          ? { ...ch, lastMessage: msg.content, lastMessageAt: msg.createdAt, unread: ch._id !== activeChannelRef.current ? (ch.unread || 0) + 1 : 0 }
           : ch
       ));
     });
@@ -408,15 +483,18 @@ export default function TeamsChat({ role: roleProp }) {
     socketRef.current.on('receive_message', (msg) => {
       const partnerId = msg.from === myId ? msg.to : msg.from;
       // Add to DM thread if open
-      if (activeDMId && (partnerId === activeDMId || msg.from === activeDMId)) {
+      if (activeDMRef.current && (partnerId === activeDMRef.current || msg.from === activeDMRef.current)) {
         setMessages(prev => prev.find(m => m._id === msg._id) ? prev : [...prev, msg]);
+        if (msg.from === activeDMRef.current) {
+          fetch(`${API_URL}/messages/read/${msg.from}`, { method: 'PUT', headers: getAuthHeader() }).catch(console.error);
+        }
       }
       // Update DM sidebar preview
       setDms(prev => {
         const exists = prev.find(d => d.id === partnerId);
         if (exists) {
           return prev.map(d => d.id === partnerId
-            ? { ...d, lastMessage: msg.content, lastMessageAt: msg.createdAt, unread: d.id !== activeDMId ? (d.unread || 0) + 1 : 0 }
+            ? { ...d, lastMessage: msg.content, lastMessageAt: msg.createdAt, unread: d.id !== activeDMRef.current ? (d.unread || 0) + 1 : 0 }
             : d
           );
         }
@@ -426,17 +504,44 @@ export default function TeamsChat({ role: roleProp }) {
 
     socketRef.current.on('channel_created', (ch) => {
       setChannels(prev => prev.find(c => c._id === ch._id) ? prev : [ch, ...prev]);
+      socketRef.current.emit('join_room', `channel_${ch._id}`);
     });
     socketRef.current.on('channel_updated', (ch) => {
       setChannels(prev => prev.map(c => c._id === ch._id ? ch : c));
     });
     socketRef.current.on('channel_deleted', ({ id }) => {
       setChannels(prev => prev.filter(c => c._id !== id));
-      if (activeChannelId === id) setActiveChannelId(null);
+      if (activeChannelRef.current === id) setActiveChannelId(null);
+    });
+
+    // ── Edit events — update message in-place ─────────────────────────────
+    socketRef.current.on('channel_message_edited', (data) => {
+      if (data.channelId === activeChannelRef.current) {
+        setMessages(prev => prev.map(m =>
+          m._id === data._id ? { ...m, content: data.content, edited: true } : m
+        ));
+      }
+    });
+
+    socketRef.current.on('dm_message_edited', (data) => {
+      const partnerId = data.from === myId ? data.to : data.from;
+      if (partnerId === activeDMRef.current || data.from === activeDMRef.current) {
+        setMessages(prev => prev.map(m =>
+          m._id === data._id ? { ...m, content: data.content, edited: true } : m
+        ));
+      }
     });
 
     return () => { if (socketRef.current) socketRef.current.disconnect(); };
-  }, [myId, activeChannelId, activeDMId]);
+  }, [myId]);
+
+  // Subscribe to all channels on load so we get notifications
+  useEffect(() => {
+    if (!socketRef.current) return;
+    channels.forEach(ch => {
+      socketRef.current.emit('join_room', `channel_${ch._id}`);
+    });
+  }, [channels]);
 
   // ── Fetch initial data ────────────────────────────────────────────────────
   useEffect(() => {
@@ -494,7 +599,11 @@ export default function TeamsChat({ role: roleProp }) {
       setMsgLoading(true);
       try {
         const res = await fetch(`${API_URL}/channels/${activeChannelId}/messages`, { headers: getAuthHeader() });
-        if (res.ok) setMessages(await res.json());
+        if (res.ok) {
+          setMessages(await res.json());
+          // Clear channel unread
+          setChannels(prev => prev.map(ch => ch._id === activeChannelId ? { ...ch, unread: 0 } : ch));
+        }
         if (socketRef.current) socketRef.current.emit('join_room', `channel_${activeChannelId}`);
       } catch (e) { console.error(e); }
       finally { setMsgLoading(false); }
@@ -516,6 +625,9 @@ export default function TeamsChat({ role: roleProp }) {
           setMessages(thread);
           // Clear unread
           setDms(prev => prev.map(d => d.id === activeDMId ? { ...d, unread: 0 } : d));
+          
+          // Persist read status
+          fetch(`${API_URL}/messages/read/${activeDMId}`, { method: 'PUT', headers: getAuthHeader() }).catch(console.error);
         }
       } catch (e) { console.error(e); }
       finally { setMsgLoading(false); }
@@ -535,6 +647,80 @@ export default function TeamsChat({ role: roleProp }) {
     window.addEventListener('click', close);
     return () => { window.removeEventListener('scroll', close, true); window.removeEventListener('click', close); };
   }, []);
+
+  // ── File select handler ───────────────────────────────────────────────────
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadError('');
+    const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+    setPendingFile({ file, preview, uploading: false });
+    // reset input so same file can be re-selected
+    e.target.value = '';
+  };
+
+  // ── Send file attachment ──────────────────────────────────────────────────
+  const handleSendFile = useCallback(async () => {
+    if (!pendingFile || !activeChannelId && !activeDMId) return;
+    setPendingFile(pf => ({ ...pf, uploading: true }));
+    setUploadError('');
+
+    try {
+      // 1. Upload file
+      const form = new FormData();
+      form.append('file', pendingFile.file);
+      const upRes = await fetch(`${API_URL}/messages/upload`, {
+        method: 'POST', headers: getAuthHeaderForm(), body: form,
+      });
+      if (!upRes.ok) { const d = await upRes.json(); throw new Error(d.message || 'Upload failed'); }
+      const attachment = await upRes.json(); // { url, fileName, fileType, fileSize }
+
+      // 2. Send message with attachment
+      const isChannel = !!activeChannelId;
+      const optimisticId = `opt_${Date.now()}`;
+      const optimistic = isChannel
+        ? { _id: optimisticId, channelId: activeChannelId, senderId: myId, senderName: myName,
+            content: text.trim() || '', attachment, createdAt: new Date().toISOString(), _optimistic: true }
+        : { _id: optimisticId, from: myId, to: activeDMId, content: text.trim() || '',
+            fromName: myName, attachment, createdAt: new Date().toISOString(), _optimistic: true };
+
+      setMessages(prev => [...prev, optimistic]);
+      const sentText = text.trim();
+      setText('');
+      setPendingFile(null);
+
+      let saved;
+      if (isChannel) {
+        const res = await fetch(`${API_URL}/channels/${activeChannelId}/messages`, {
+          method: 'POST', headers: getAuthHeader(),
+          body: JSON.stringify({ content: sentText, attachment }),
+        });
+        if (!res.ok) throw new Error('Send failed');
+        saved = await res.json();
+        if (socketRef.current) socketRef.current.emit('channel_message', { ...saved, to: `channel_${activeChannelId}` });
+        setChannels(prev => prev.map(ch =>
+          ch._id === activeChannelId ? { ...ch, lastMessage: attachment.fileName, lastMessageAt: saved.createdAt } : ch
+        ));
+      } else {
+        const dmPartner = allUsers.find(u => (u._id || u.id).toString() === activeDMId);
+        const toName = dmPartner ? (buildName(dmPartner) || '') : '';
+        const res = await fetch(`${API_URL}/messages`, {
+          method: 'POST', headers: getAuthHeader(),
+          body: JSON.stringify({ to: activeDMId, toName, subject: 'Direct Message', content: sentText, attachment }),
+        });
+        if (!res.ok) throw new Error('Send failed');
+        saved = await res.json();
+        if (socketRef.current) socketRef.current.emit('send_message', { ...saved, to: activeDMId });
+        setDms(prev => prev.map(d =>
+          d.id === activeDMId ? { ...d, lastMessage: attachment.fileName, lastMessageAt: saved.createdAt } : d
+        ));
+      }
+      setMessages(prev => prev.map(m => m._id === optimisticId ? saved : m));
+    } catch (err) {
+      setUploadError(err.message || 'Upload failed');
+      setPendingFile(pf => pf ? { ...pf, uploading: false } : null);
+    }
+  }, [pendingFile, text, activeChannelId, activeDMId, myId, myName]);
 
   // ── Send message ──────────────────────────────────────────────────────────
   const handleSend = useCallback(async () => {
@@ -629,8 +815,54 @@ export default function TeamsChat({ role: roleProp }) {
         await fetch(`${API_URL}/messages/${id}`, { method: 'DELETE', headers: getAuthHeader() });
         setMessages(prev => prev.filter(m => m._id !== id));
       }
+      // Show success toast
+      setDeleteToast(true);
+      setTimeout(() => setDeleteToast(false), 3000);
     } catch (e) { console.error(e); }
     setDeleteConfirm(null);
+  };
+
+  // ── Edit message ──────────────────────────────────────────────────────────
+  const handleEditMsg = useCallback(async () => {
+    if (!editingMsg || !editingMsg.content.trim()) return;
+    const { id, content } = editingMsg;
+    setEditingMsg(null);
+    try {
+      let saved;
+      if (activeChannelId) {
+        const res = await fetch(`${API_URL}/channels/${activeChannelId}/messages/${id}`, {
+          method: 'PUT', headers: getAuthHeader(),
+          body: JSON.stringify({ content: content.trim() }),
+        });
+        if (!res.ok) throw new Error('Edit failed');
+        saved = await res.json();
+      } else {
+        const res = await fetch(`${API_URL}/messages/${id}`, {
+          method: 'PUT', headers: getAuthHeader(),
+          body: JSON.stringify({ content: content.trim() }),
+        });
+        if (!res.ok) throw new Error('Edit failed');
+        saved = await res.json();
+      }
+      setMessages(prev => prev.map(m => m._id === id ? { ...m, content: content.trim(), edited: true } : m));
+      // Emit dedicated edit event so receivers update in-place (not append)
+      if (socketRef.current) {
+        if (activeChannelId) {
+          socketRef.current.emit('channel_message_edited', {
+            _id: id, channelId: activeChannelId, content: content.trim(), edited: true,
+          });
+        } else {
+          socketRef.current.emit('dm_message_edited', {
+            _id: id, from: myId, to: activeDMId, content: content.trim(), edited: true,
+          });
+        }
+      }
+    } catch (e) { console.error(e); }
+  }, [editingMsg, activeChannelId]);
+
+  const handleEditKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleEditMsg(); }
+    if (e.key === 'Escape') { setEditingMsg(null); }
   };
 
   const handleCreateChannel = async (data) => {
@@ -681,6 +913,7 @@ export default function TeamsChat({ role: roleProp }) {
 
   const isOwner   = (msg) => (msg.senderId?.toString() === myId) || (msg.from === myId);
   const canDelete = (msg) => canManage || isOwner(msg);
+  const canEdit   = (msg) => !msg.deletedAt && isOwner(msg) && (Date.now() - new Date(msg.createdAt).getTime() < 15 * 60 * 1000);
   const canPost   = (ch)  => !ch || ch.canPost !== 'admin_manager' || canManage;
 
   const totalUnread = dms.reduce((s, d) => s + (d.unread || 0), 0);
@@ -777,6 +1010,15 @@ export default function TeamsChat({ role: roleProp }) {
             className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors">
             <Reply className="w-4 h-4 text-slate-400" /> Reply
           </button>
+          {canEdit(contextMenu.msg) && (
+            <>
+              <div className="my-1 border-t border-slate-100" />
+              <button onClick={() => { setEditingMsg({ id: contextMenu.msg._id, content: contextMenu.msg.content }); setContextMenu(null); }}
+                className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-amber-600 hover:bg-amber-50 transition-colors">
+                <Edit2 className="w-4 h-4" /> Edit
+              </button>
+            </>
+          )}
           {canDelete(contextMenu.msg) && (
             <>
               <div className="my-1 border-t border-slate-100" />
@@ -788,6 +1030,17 @@ export default function TeamsChat({ role: roleProp }) {
           )}
         </div>
       )}
+
+      {/* Delete success toast */}
+      <div
+        className={`fixed bottom-6 right-6 z-[200] flex items-center gap-2.5 bg-slate-800 text-white text-sm font-medium px-4 py-3 rounded-2xl shadow-xl transition-all duration-300
+          ${deleteToast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3 pointer-events-none'}`}
+      >
+        <div className="w-5 h-5 bg-emerald-500 rounded-full flex items-center justify-center flex-shrink-0">
+          <Check className="w-3 h-3 text-white" strokeWidth={3} />
+        </div>
+        Message deleted successfully
+      </div>
 
       {/* ════════════════════════════════════════════════════════════════════
           LEFT SIDEBAR — ash theme
@@ -843,50 +1096,72 @@ export default function TeamsChat({ role: roleProp }) {
           </div>
         </div>
 
+        {/* Tabs */}
+        <div className="flex px-3 pb-2 mt-2 border-b border-slate-200">
+          <button onClick={() => setActiveTab('chats')}
+            className={`flex-1 flex items-center justify-center gap-1.5 pb-2 text-sm font-semibold transition-colors border-b-2 ${activeTab === 'chats' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            <MessageCircle className="w-4 h-4" /> Chats
+            {totalUnread > 0 && (
+              <span className="bg-blue-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                {totalUnread}
+              </span>
+            )}
+          </button>
+          <button onClick={() => setActiveTab('groups')}
+            className={`flex-1 flex items-center justify-center gap-1.5 pb-2 text-sm font-semibold transition-colors border-b-2 ${activeTab === 'groups' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            <Hash className="w-4 h-4" /> Groups
+          </button>
+        </div>
+
         {/* Scrollable list */}
         <div className="flex-1 overflow-y-auto custom-scrollbar py-2">
-
-          {/* ── Channels Section ── */}
-          <div className="px-3 mb-1">
-            <button onClick={() => setChannelsPanelOpen(v => !v)}
-              className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wider hover:text-slate-700 transition-colors w-full">
-              {channelsPanelOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-              Channels
-              <span className="ml-1 text-[10px] font-normal normal-case text-slate-400">{filteredChannels.length}</span>
-            </button>
-          </div>
-
-          {channelsPanelOpen && (
+          
+          {activeTab === 'groups' && (
             <div className="space-y-0.5 px-2 mb-3">
+              <div className="px-1 mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">All Groups</span>
+              </div>
               {filteredChannels.length === 0 ? (
-                <div className="px-3 py-3 text-center">
-                  <Hash className="w-5 h-5 text-slate-300 mx-auto mb-1" />
-                  <p className="text-xs text-slate-400">{canManage ? 'Create your first channel' : 'No channels yet'}</p>
+                <div className="px-3 py-6 text-center">
+                  <Hash className="w-6 h-6 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-slate-600">No groups found</p>
+                  <p className="text-xs text-slate-400 mt-1">{canManage ? 'Create a new group to get started.' : 'You are not in any groups.'}</p>
+                  {canManage && (
+                    <button onClick={() => setShowCreateModal(true)}
+                      className="mt-3 px-3 py-1.5 bg-white border border-slate-200 text-xs font-semibold text-slate-700 rounded-lg shadow-sm hover:bg-slate-50 transition-colors">
+                      Create Group
+                    </button>
+                  )}
                 </div>
               ) : filteredChannels.map(ch => {
                 const isActive = ch._id === activeChannelId;
                 const colorCls = CHANNEL_COLORS[ch.color] || 'bg-blue-500';
                 return (
                   <div key={ch._id}
-                    className={`group relative flex items-center gap-2.5 px-2.5 py-2 rounded-xl cursor-pointer transition-all
+                    className={`group relative flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl cursor-pointer transition-all
                       ${isActive ? 'bg-white shadow-sm border border-slate-200' : 'hover:bg-white/60'}`}
                     onClick={() => { setActiveChannelId(ch._id); setActiveDMId(null); }}>
-                    <div className={`w-7 h-7 ${colorCls} rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm`}>
-                      <ChannelIcon type={ch.type} size={3} />
+                    <div className={`w-8 h-8 ${colorCls} rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm`}>
+                      <ChannelIcon type={ch.type} size={4} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1">
-                        <span className={`text-sm truncate ${isActive ? 'text-slate-800 font-semibold' : 'text-slate-600 font-medium'}`}>
+                      <div className="flex items-center gap-1 w-full mb-0.5">
+                        <span className={`text-sm truncate flex-1 ${isActive ? 'text-slate-800 font-bold' : 'text-slate-700 font-semibold'}`}>
                           {ch.name}
                         </span>
-                        {ch.pinned && <Pin className="w-2.5 h-2.5 text-slate-400 flex-shrink-0" />}
+                        {ch.pinned && <Pin className="w-3 h-3 text-slate-400 flex-shrink-0" />}
+                        {ch.unread > 0 && (
+                          <span className="flex-shrink-0 bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center justify-center">
+                            {ch.unread > 9 ? '9+' : ch.unread}
+                          </span>
+                        )}
                       </div>
                       {ch.lastMessage && (
-                        <p className="text-[11px] text-slate-400 truncate">{ch.lastMessage}</p>
+                        <p className={`text-[11px] truncate ${ch.unread > 0 ? 'text-slate-700 font-semibold' : 'text-slate-500'}`}>{ch.lastMessage}</p>
                       )}
                     </div>
                     {canManage && (
-                      <div className="hidden group-hover:flex items-center gap-0.5 absolute right-2 bg-white rounded-lg border border-slate-200 shadow-sm px-0.5">
+                      <div className="hidden group-hover:flex items-center gap-0.5 absolute right-2 bg-white rounded-lg border border-slate-200 shadow-sm px-0.5 py-0.5">
                         <button onClick={e => { e.stopPropagation(); setEditingChannel(ch); }}
                           className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
                           <Edit2 className="w-3 h-3" />
@@ -900,71 +1175,59 @@ export default function TeamsChat({ role: roleProp }) {
                   </div>
                 );
               })}
-              {canManage && (
+              {canManage && filteredChannels.length > 0 && (
                 <button onClick={() => setShowCreateModal(true)}
-                  className="flex items-center gap-2 w-full px-2.5 py-1.5 text-slate-400 hover:text-slate-600 hover:bg-white/60 rounded-xl transition-colors text-xs">
-                  <div className="w-4 h-4 border border-dashed border-slate-300 rounded flex items-center justify-center">
-                    <Plus className="w-2.5 h-2.5" />
+                  className="flex items-center gap-2 w-full px-2.5 py-2 mt-2 text-slate-500 hover:text-slate-800 hover:bg-slate-200/50 rounded-xl transition-colors text-sm font-medium">
+                  <div className="w-6 h-6 bg-slate-200 rounded-lg flex items-center justify-center text-slate-500">
+                    <Plus className="w-4 h-4" />
                   </div>
-                  Add a channel
+                  New Group
                 </button>
               )}
             </div>
           )}
 
-          {/* ── Direct Messages Section ── */}
-          <div className="px-3 mb-1">
-            <div className="flex items-center justify-between">
-              <button onClick={() => setDmsPanelOpen(v => !v)}
-                className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wider hover:text-slate-700 transition-colors">
-                {dmsPanelOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                Direct Messages
-                {totalUnread > 0 && (
-                  <span className="ml-1 bg-blue-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-                    {totalUnread}
-                  </span>
-                )}
-              </button>
-              <button onClick={() => setShowNewDM(true)}
-                className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-slate-200 transition-colors"
-                title="New direct message">
-                <Plus className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          {dmsPanelOpen && (
+          {activeTab === 'chats' && (
             <div className="space-y-0.5 px-2">
+              <div className="px-1 mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Direct Messages</span>
+                <button onClick={() => setShowNewDM(true)}
+                  className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-slate-200 transition-colors"
+                  title="New direct message">
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
               {filteredDMs.length === 0 ? (
-                <div className="px-3 py-3 text-center">
-                  <MessageCircle className="w-5 h-5 text-slate-300 mx-auto mb-1" />
-                  <p className="text-xs text-slate-400">No direct messages yet</p>
+                <div className="px-3 py-6 text-center">
+                  <MessageCircle className="w-6 h-6 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-slate-600">No chats yet</p>
+                  <p className="text-xs text-slate-400 mt-1">Start a conversation with a team member.</p>
                   <button onClick={() => setShowNewDM(true)}
-                    className="text-xs text-blue-500 hover:text-blue-600 font-medium mt-1 transition-colors">
-                    Start a conversation
+                    className="mt-3 px-3 py-1.5 bg-white border border-slate-200 text-xs font-semibold text-slate-700 rounded-lg shadow-sm hover:bg-slate-50 transition-colors">
+                    Start Chat
                   </button>
                 </div>
               ) : filteredDMs.map(dm => {
                 const isActive = dm.id === activeDMId;
                 return (
                   <div key={dm.id}
-                    className={`flex items-center gap-2.5 px-2.5 py-2 rounded-xl cursor-pointer transition-all
+                    className={`flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl cursor-pointer transition-all
                       ${isActive ? 'bg-white shadow-sm border border-slate-200' : 'hover:bg-white/60'}`}
                     onClick={() => { setActiveDMId(dm.id); setActiveChannelId(null); }}>
-                    <Avatar name={dm.name} size="sm" online />
+                    <Avatar name={dm.name} size="md" online />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className={`text-sm truncate ${isActive ? 'text-slate-800 font-semibold' : 'text-slate-600 font-medium'}`}>
+                      <div className="flex items-center justify-between gap-1 mb-0.5">
+                        <span className={`text-sm truncate ${isActive ? 'text-slate-800 font-bold' : 'text-slate-700 font-semibold'}`}>
                           {dm.name}
                         </span>
                         {dm.unread > 0 && (
-                          <span className="flex-shrink-0 bg-blue-500 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                          <span className="flex-shrink-0 bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center justify-center">
                             {dm.unread > 9 ? '9+' : dm.unread}
                           </span>
                         )}
                       </div>
                       {dm.lastMessage && (
-                        <p className={`text-[11px] truncate ${dm.unread > 0 ? 'text-slate-600 font-medium' : 'text-slate-400'}`}>
+                        <p className={`text-[11px] truncate ${dm.unread > 0 ? 'text-slate-700 font-semibold' : 'text-slate-500'}`}>
                           {dm.lastMessage}
                         </p>
                       )}
@@ -972,13 +1235,6 @@ export default function TeamsChat({ role: roleProp }) {
                   </div>
                 );
               })}
-              <button onClick={() => setShowNewDM(true)}
-                className="flex items-center gap-2 w-full px-2.5 py-1.5 text-slate-400 hover:text-slate-600 hover:bg-white/60 rounded-xl transition-colors text-xs">
-                <div className="w-4 h-4 border border-dashed border-slate-300 rounded flex items-center justify-center">
-                  <Plus className="w-2.5 h-2.5" />
-                </div>
-                New message
-              </button>
             </div>
           )}
         </div>
@@ -1139,10 +1395,18 @@ export default function TeamsChat({ role: roleProp }) {
                                 </div>
                               )}
 
-                              <p className={`text-sm leading-relaxed break-words whitespace-pre-wrap
-                                ${isDeleted ? 'text-slate-400 italic' : 'text-slate-700'}`}>
-                                {msg.content}
-                              </p>
+                              {msg.content && (
+                                <p className={`text-sm leading-relaxed break-words whitespace-pre-wrap
+                                  ${isDeleted ? 'text-slate-400 italic' : 'text-slate-700'}`}>
+                                  {msg.content}
+                                </p>
+                              )}
+                              {!isDeleted && msg.edited && (
+                                <span className="text-[10px] text-slate-400 italic">(edited)</span>
+                              )}
+                              {msg.attachment && !isDeleted && (
+                                <AttachmentDisplay attachment={msg.attachment} />
+                              )}
                             </div>
 
                             {/* Hover actions */}
@@ -1152,6 +1416,13 @@ export default function TeamsChat({ role: roleProp }) {
                                   className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
                                   <Reply className="w-3.5 h-3.5" />
                                 </button>
+                                {canEdit(msg) && (
+                                  <button onClick={() => setEditingMsg({ id: msg._id, content: msg.content })}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-amber-50 transition-colors"
+                                    title="Edit (within 15 min)">
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                                 {canDelete(msg) && (
                                   <button onClick={() => setDeleteConfirm(msg._id)}
                                     className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors">
@@ -1172,6 +1443,38 @@ export default function TeamsChat({ role: roleProp }) {
                 <div className="flex-shrink-0 px-4 py-3 bg-white border-t border-slate-100">
                   {(headerInfo.isDM || canPost(activeChannel)) ? (
                     <>
+                      {/* ── Inline edit bar ─────────────────────────────────── */}
+                      {editingMsg && (
+                        <div className="mb-2">
+                          <div className="flex items-center gap-2 mb-1.5 px-1">
+                            <Edit2 className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                            <span className="text-[11px] font-semibold text-amber-600">Editing message</span>
+                            <button onClick={() => setEditingMsg(null)} className="ml-auto text-slate-400 hover:text-slate-600 transition-colors">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="flex items-end gap-2">
+                            <div className="flex-1 bg-amber-50 border-2 border-amber-300 rounded-2xl px-4 py-2.5 focus-within:border-amber-400 transition-colors">
+                              <textarea
+                                autoFocus
+                                value={editingMsg.content}
+                                onChange={e => setEditingMsg(em => ({ ...em, content: e.target.value }))}
+                                onKeyDown={handleEditKeyDown}
+                                rows={1}
+                                className="w-full bg-transparent text-sm text-slate-700 outline-none resize-none leading-relaxed"
+                                style={{ maxHeight: 120 }}
+                              />
+                            </div>
+                            <button onClick={handleEditMsg} disabled={!editingMsg.content.trim()}
+                              className={`flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-sm
+                                ${editingMsg.content.trim() ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
+                              <Check className="w-4 h-4" strokeWidth={3} />
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 px-1">Enter to save · Esc to cancel</p>
+                        </div>
+                      )}
+
                       {replyingTo && (
                         <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-xl">
                           <div className="flex-1 border-l-2 border-blue-400 pl-2">
@@ -1186,6 +1489,37 @@ export default function TeamsChat({ role: roleProp }) {
                         </div>
                       )}
 
+                      {/* Hidden file input */}
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                        className="hidden"
+                        onChange={handleFileSelect}
+                      />
+
+                      {/* Pending file preview strip */}
+                      {pendingFile && (
+                        <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-xl">
+                          {pendingFile.preview
+                            ? <img src={pendingFile.preview} alt="" className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
+                            : <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0"><FileText className="w-5 h-5 text-blue-600" /></div>
+                          }
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-slate-700 truncate">{pendingFile.file.name}</p>
+                            <p className="text-[11px] text-slate-400">{fmtBytes(pendingFile.file.size)}</p>
+                          </div>
+                          {pendingFile.uploading
+                            ? <Loader2 className="w-4 h-4 animate-spin text-blue-500 flex-shrink-0" />
+                            : <button onClick={() => { setPendingFile(null); setUploadError(''); }} className="text-slate-400 hover:text-red-500 transition-colors"><X className="w-4 h-4" /></button>
+                          }
+                        </div>
+                      )}
+
+                      {uploadError && (
+                        <p className="mb-1 text-xs text-red-500 px-1">{uploadError}</p>
+                      )}
+
                       <div className="flex items-end gap-2 relative">
                         {showEmoji && (
                           <EmojiPicker
@@ -1196,6 +1530,13 @@ export default function TeamsChat({ role: roleProp }) {
                         <button onClick={() => setShowEmoji(v => !v)}
                           className={`flex-shrink-0 p-2 rounded-xl transition-colors ${showEmoji ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
                           <Smile className="w-5 h-5" />
+                        </button>
+
+                        {/* Attach button */}
+                        <button onClick={() => fileInputRef.current?.click()}
+                          className="flex-shrink-0 p-2 rounded-xl transition-colors text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                          title="Attach file">
+                          <Paperclip className="w-5 h-5" />
                         </button>
 
                         <div className="flex-1 bg-slate-100 border border-slate-200 rounded-2xl px-4 py-2.5 flex items-end gap-2 focus-within:border-blue-300 focus-within:bg-white transition-colors">
@@ -1213,11 +1554,19 @@ export default function TeamsChat({ role: roleProp }) {
                           />
                         </div>
 
-                        <button onClick={handleSend} disabled={!text.trim() || sending}
-                          className={`flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-sm
-                            ${text.trim() ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
-                          <Send className="w-4 h-4" />
-                        </button>
+                        {pendingFile ? (
+                          <button onClick={handleSendFile} disabled={pendingFile.uploading}
+                            className={`flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-sm
+                              ${pendingFile.uploading ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+                            {pendingFile.uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                          </button>
+                        ) : (
+                          <button onClick={handleSend} disabled={!text.trim() || sending}
+                            className={`flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-sm
+                              ${text.trim() ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
+                            <Send className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </>
                   ) : (

@@ -22,7 +22,7 @@ const messageSchema = mongoose.Schema({
   senderName:  { type: String, default: '' },
 
   subject: { type: String, default: '' },
-  content: { type: String, required: true },
+  content: { type: String, default: '' },  // empty string allowed for file-only messages
   type:    { type: String, enum: ['text', 'system', 'announcement'], default: 'text' },
 
   // Reply threading
@@ -39,6 +39,15 @@ const messageSchema = mongoose.Schema({
 
   edited:    { type: Boolean, default: false },
   deletedAt: { type: Date, default: null },
+
+  // File attachment (optional — present when a file was shared)
+  attachment: {
+    url:        { type: String, default: null },
+    publicId:   { type: String, default: '' },   // Cloudinary public_id for deletion
+    fileName:   { type: String, default: '' },
+    fileType:   { type: String, default: '' },
+    fileSize:   { type: Number, default: 0 },
+  },
 }, {
   timestamps: true,
 });

@@ -4,11 +4,12 @@ import * as XLSX from 'xlsx';
 import {
   Search, Plus, Eye, Loader2,
   ArrowUpDown, ArrowUp, ArrowDown, Users, Download,
-  X, Edit, Trash2, Calendar, ChevronDown,
+  X, Edit, Trash2, Calendar, ChevronDown, ChevronUp,
   CheckCircle2, FileText, Sparkles, Settings2, Check, GripVertical,
   Clock, Ban, FileSpreadsheet, Building, Award, Briefcase
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { ScoreBadge, MatchBreakdownBar, SkillChips, MatchReasonBox, getScoreValue, getMatchLevelClass } from '@/components/Score/ScoreComponents';
 
 // ── Inline Excel Import Logic ─────────────────────────────────────────────────
 const _FIELD_ALIASES = {
@@ -185,6 +186,9 @@ const downloadCandidateTemplate = () => {
 // ── ENV Config ────────────────────────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 const API_URL = `${BASE_URL}/api`;
+
+const parseSearchTerms = (searchText) =>
+  [...new Set(searchText.toLowerCase().split(/[,\s]+/).map(term => term.trim()).filter(Boolean))];
 
 const getAuthHeader = () => {
   try {
@@ -526,6 +530,11 @@ export default function AdminCandidates() {
   const [sortConfig, setSortConfig] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [viewCandidate, setViewCandidate] = useState(null);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [candidateScoreData, setCandidateScoreData] = useState(null);
+  const [isScoringCandidate, setIsScoringCandidate] = useState(false);
+  const [scoreExpanded, setScoreExpanded] = useState(false);
   const ITEMS_PER_PAGE = 10;
 
   // ── Tenant Settings (live, so changes reflect immediately) ────────────────
@@ -545,10 +554,8 @@ export default function AdminCandidates() {
 
   // ── Dialog State ──────────────────────────────────────────────────────────
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
-  const [viewCandidate, setViewCandidate] = useState(null);
   const [errors, setErrors] = useState({});
   const [isTodaySubOpen, setIsTodaySubOpen] = useState(false);
   const [isCheckingEmail, setIsCheckingEmail] = useState(false);
@@ -987,72 +994,76 @@ export default function AdminCandidates() {
     setIsDialogOpen(true);
   };
 
+  const setEditFormFromCandidate = (candidate) => {
+    const jobTitles = jobs.map((j) => j.title || j.jobTitle || j.position || '').filter(Boolean);
+    const savedPos = candidate.position || '';
+    const isKnownJob = jobTitles.includes(savedPos);
+    setFormData({
+      firstName: candidate.firstName || '',
+      lastName: candidate.lastName || '',
+      contact: candidate.contact || '',
+      alternateNumber: candidate.alternateNumber || '',
+      email: candidate.email || '',
+      dateOfBirth: candidate.dateOfBirth ? getSafeDate(candidate.dateOfBirth) : '',
+      dateAdded: candidate.dateAdded ? getSafeDate(candidate.dateAdded) : '',
+      gender: candidate.gender || '',
+      linkedin: candidate.linkedin || '',
+      currentLocation: candidate.currentLocation || '',
+      preferredLocation: candidate.preferredLocation || '',
+      position: isKnownJob || !savedPos ? savedPos : 'Other',
+      positionOther: !isKnownJob && savedPos ? savedPos : '',
+      client: candidate.client || '',
+      clientCandidateId: candidate.clientCandidateId || '',
+      currentCompany: candidate.currentCompany || '',
+      industry: candidate.industry || '',
+      totalExperience: candidate.totalExperience || '',
+      totalExperienceYears: (candidate.totalExperience || '').split('yrs')[0]?.trim() || '0',
+      totalExperienceMonths: (candidate.totalExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
+      relevantExperience: candidate.relevantExperience || '',
+      relevantExperienceYears: (candidate.relevantExperience || '').split('yrs')[0]?.trim() || '0',
+      relevantExperienceMonths: (candidate.relevantExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
+      education: candidate.education || '',
+      ctc: candidate.ctc || '',
+      currentTakeHome: candidate.currentTakeHome || '',
+      ectc: candidate.ectc || '',
+      expectedTakeHome: candidate.expectedTakeHome || '',
+      noticePeriod: candidate.noticePeriod || '',
+      servingNoticePeriod: candidate.servingNoticePeriod ? 'true' : 'false',
+      lwd: candidate.lwd ? getSafeDate(candidate.lwd) : '',
+      reasonForChange: candidate.reasonForChange || '',
+      offersInHand: candidate.offersInHand ? 'true' : 'false',
+      offerPackage: candidate.offerPackage || '',
+      source: candidate.source || 'Portal',
+      status: (() => {
+        if (Array.isArray(candidate.status)) return candidate.status;
+        if (typeof candidate.status === 'string') return candidate.status.split(',').map(s => s.trim()).filter(Boolean);
+        return ['Submitted'];
+      })(),
+      recruiterId: typeof candidate.recruiterId === 'object' ? candidate.recruiterId?._id : candidate.recruiterId || '',
+      skills: Array.isArray(candidate.skills) ? candidate.skills.join(', ') : candidate.skills || '',
+      remarks: candidate.remarks || '',
+      customFields: candidate.customFields || {},
+    });
+  };
+
   const openEditDialog = async (c) => {
     setIsEditMode(true);
     setSelectedCandidateId(c._id);
     setSelectedDeliverClientId('');
-    setViewingCandidate(c);
-    const jobTitles = jobs.map((j) => j.title || j.jobTitle || j.position || '').filter(Boolean);
-    const savedPos = c.position || '';
-    const isKnownJob = jobTitles.includes(savedPos);
-    setFormData({
-      firstName: c.firstName || '',
-      lastName: c.lastName || '',
-      contact: c.contact || '',
-      alternateNumber: c.alternateNumber || '',
-      email: c.email || '',
-      dateOfBirth: c.dateOfBirth ? getSafeDate(c.dateOfBirth) : '',
-      dateAdded: c.dateAdded ? getSafeDate(c.dateAdded) : '',
-      gender: c.gender || '',
-      linkedin: c.linkedin || '',
-      currentLocation: c.currentLocation || '',
-      preferredLocation: c.preferredLocation || '',
-      position: isKnownJob || !savedPos ? savedPos : 'Other',
-      positionOther: !isKnownJob && savedPos ? savedPos : '',
-      client: c.client || '',
-      clientCandidateId: c.clientCandidateId || '',
-      currentCompany: c.currentCompany || '',
-      industry: c.industry || '',
-      totalExperience: c.totalExperience || '',
-      totalExperienceYears: (c.totalExperience || '').split('yrs')[0]?.trim() || '0',
-      totalExperienceMonths: (c.totalExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
-      relevantExperience: c.relevantExperience || '',
-      relevantExperienceYears: (c.relevantExperience || '').split('yrs')[0]?.trim() || '0',
-      relevantExperienceMonths: (c.relevantExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
-      education: c.education || '',
-      ctc: c.ctc || '',
-      currentTakeHome: c.currentTakeHome || '',
-      ectc: c.ectc || '',
-      expectedTakeHome: c.expectedTakeHome || '',
-      noticePeriod: c.noticePeriod || '',
-      servingNoticePeriod: c.servingNoticePeriod ? 'true' : 'false',
-      lwd: c.lwd ? getSafeDate(c.lwd) : '',
-      reasonForChange: c.reasonForChange || '',
-      offersInHand: c.offersInHand ? 'true' : 'false',
-      offerPackage: c.offerPackage || '',
-      source: c.source || 'Portal',
-      status: (() => {
-        if (Array.isArray(c.status)) return c.status;
-        if (typeof c.status === 'string') return c.status.split(',').map(s => s.trim()).filter(Boolean);
-        return ['Submitted'];
-      })(),
-      recruiterId: typeof c.recruiterId === 'object' ? c.recruiterId?._id : c.recruiterId || '',
-      skills: Array.isArray(c.skills) ? c.skills.join(', ') : c.skills || '',
-      remarks: c.remarks || '',
-      customFields: c.customFields || {},
-    });
-    setErrors({});
-    setIsDialogOpen(true);
-
+    let candidateForEdit = c;
     try {
       const headers = getAuthHeader();
       const res = await fetch(`${API_URL}/candidates/${c._id}`, { headers });
       if (res.ok) {
-        setViewingCandidate(await res.json());
+        candidateForEdit = await res.json();
       }
     } catch (err) {
       console.error("Error loading details for edit modal:", err);
     }
+    setViewingCandidate(candidateForEdit);
+    setEditFormFromCandidate(candidateForEdit);
+    setErrors({});
+    setIsDialogOpen(true);
   };
 
   // ── Sort ──────────────────────────────────────────────────────────────────
@@ -1069,14 +1080,17 @@ export default function AdminCandidates() {
 
   // ── Filtered / Sorted / Paginated Candidates ──────────────────────────────
   const filteredCandidates = useMemo(() => {
+    const roleSearch = roleSearchTerm.toLowerCase();
+    const roleSearchTerms = parseSearchTerms(roleSearchTerm);
     let result = candidates.filter((c) => {
       const matchSearch = (c.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c.candidateId || '').toLowerCase().includes(searchTerm.toLowerCase());
         
+      const skillText = (Array.isArray(c.skills) ? c.skills.join(' ') : c.skills || '').toLowerCase();
       const roleMatch = !roleSearchTerm || 
-        (c.position && c.position.toLowerCase().includes(roleSearchTerm.toLowerCase())) ||
-        (Array.isArray(c.skills) && c.skills.some(skill => skill.toLowerCase().includes(roleSearchTerm.toLowerCase())));
+        (c.position && c.position.toLowerCase().includes(roleSearch)) ||
+        roleSearchTerms.every(term => skillText.includes(term));
         
       const statusArr = Array.isArray(c.status) ? c.status : [c.status || ''];
       const matchStatus = statusFilter === 'all' || statusArr.includes(statusFilter);
@@ -1406,7 +1420,7 @@ export default function AdminCandidates() {
             </div>
             <div className="relative w-full sm:max-w-sm">
               <Briefcase className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <input value={roleSearchTerm} onChange={(e) => setRoleSearchTerm(e.target.value)} placeholder="Search job role or skills…" className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <input value={roleSearchTerm} onChange={(e) => setRoleSearchTerm(e.target.value)} placeholder="Search by role or skills e.g. React, SQL, Java" className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
           <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full md:w-auto">
@@ -1491,7 +1505,14 @@ export default function AdminCandidates() {
                                 {c.name ? c.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : '?'}
                               </div>
                               <div className="flex flex-col">
-                                <span className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{c.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setViewCandidate(c); setIsViewDialogOpen(true); refreshViewingCandidate(c._id); }}
+                                  className="text-left font-bold text-slate-900 group-hover:text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 transition-colors"
+                                  title="View Candidate"
+                                >
+                                  {c.name}
+                                </button>
                                 <span className="text-[10px] text-slate-400 font-medium">{c.position || 'No Role'}</span>
                               </div>
                             </div>
@@ -2214,8 +2235,70 @@ export default function AdminCandidates() {
                 <h2 className="text-xl font-bold text-slate-900">{viewCandidate.name}</h2>
                 <p className="text-sm font-mono text-blue-600 mt-1">{getCandidateId(viewCandidate)}</p>
               </div>
-              <button onClick={() => setIsViewDialogOpen(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold leading-none px-2">×</button>
+              <div className="flex items-center gap-4">
+                {viewCandidate.requirementId && (
+                  <button 
+                    onClick={async () => {
+                      setIsScoringCandidate(true);
+                      setCandidateScoreData(null);
+                      try {
+                        const headers = getAuthHeader();
+                        const res = await fetch(`${API_URL}/score-match`, {
+                          method: 'POST',
+                          headers: { ...headers, 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ candidateId: viewCandidate._id, requirementId: viewCandidate.requirementId })
+                        });
+                        if (res.ok) {
+                          setCandidateScoreData(await res.json());
+                          setScoreExpanded(true);
+                        }
+                      } catch(e) {} finally { setIsScoringCandidate(false); }
+                    }}
+                    disabled={isScoringCandidate}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-sm font-semibold transition"
+                  >
+                    {isScoringCandidate ? <><Loader2 className="w-4 h-4 animate-spin"/> Scoring...</> : 'Score Candidate'}
+                  </button>
+                )}
+                <button onClick={() => setIsViewDialogOpen(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold leading-none px-2">×</button>
+              </div>
             </div>
+            
+            {/* Score Match Panel */}
+            {candidateScoreData && (
+              <div className="border-b border-slate-200 bg-white">
+                <div 
+                  className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition"
+                  onClick={() => setScoreExpanded(!scoreExpanded)}
+                >
+                  <div className="flex items-center gap-4">
+                    <ScoreBadge score={getScoreValue(candidateScoreData)} />
+                    <div>
+                      <h3 className="font-bold text-slate-900">Score Match</h3>
+                      <span className={`inline-flex items-center px-2 py-0.5 mt-1 rounded text-xs font-semibold border ${getMatchLevelClass(candidateScoreData.matchLevel)}`}>
+                        {candidateScoreData.matchLevel}
+                      </span>
+                    </div>
+                  </div>
+                  {scoreExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                </div>
+                {scoreExpanded && (
+                  <div className="px-6 pb-6 pt-2 bg-slate-50/50 border-t border-slate-100">
+                    <MatchBreakdownBar breakdown={candidateScoreData.breakdown} />
+                    <MatchReasonBox reason={candidateScoreData.reason} flags={candidateScoreData.atsFlags} />
+                    <SkillChips
+                      matched={candidateScoreData.matchedSkills}
+                      missing={candidateScoreData.missingSkills}
+                      matchedMandatory={candidateScoreData.matchedMandatorySkills}
+                      missingMandatory={candidateScoreData.missingMandatorySkills}
+                      matchedPreferred={candidateScoreData.matchedPreferredSkills}
+                      missingPreferred={candidateScoreData.missingPreferredSkills}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="p-6 overflow-y-auto flex-1 space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-4">
                 {[

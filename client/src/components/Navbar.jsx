@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import {
   LayoutDashboard, UserPlus, Briefcase,
@@ -7,7 +7,7 @@ import {
   BarChart3, Settings, Power, User, Users, Calendar,
   Video, FileText, Handshake, Lock, Zap, Crown, Sparkles,
   ChevronRight, AlertTriangle, Menu, X, MoreHorizontal, ChevronDown,
-  Loader2, CheckCircle2, Mail
+  Loader2, CheckCircle2, Mail, BookOpen
 } from 'lucide-react';
 import clsx from 'clsx';
 import UpgradePlanModal from './UpgradePlanModal';
@@ -72,6 +72,7 @@ const lockLabel = (path) => {
 
 export default function Navbar() {
   const { userRole, logout, currentUser, authHeaders } = useAuth();
+  const navigate = useNavigate();
 
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -223,6 +224,20 @@ export default function Navbar() {
     return 'text-slate-300';
   }, [currentPlan]);
 
+  const renderRoleBadge = () => {
+    if (!userRole) return null;
+    switch (userRole.toLowerCase()) {
+      case 'admin':
+        return <span className="bg-purple-500/30 text-purple-100 border border-purple-400/30 text-[11px] uppercase font-semibold px-1.5 py-0.5 rounded mr-2 tracking-widest leading-none shrink-0">Manager</span>;
+      case 'manager':
+        return <span className="bg-indigo-500/30 text-indigo-100 border border-indigo-400/30 text-[11px] uppercase font-semibold px-1.5 py-0.5 rounded mr-2 tracking-widest leading-none shrink-0">Admin</span>;
+      case 'recruiter':
+        return <span className="bg-slate-400/30 text-slate-100 border border-slate-400/30 text-[11px] uppercase font-semibold px-1.5 py-0.5 rounded mr-2 tracking-widest leading-none shrink-0">Recruiter</span>;
+      default:
+        return <span className="bg-white/10 text-white/80 border border-white/20 text-[9px] uppercase font-bold px-1.5 py-0.5 rounded mr-2 tracking-widest leading-none shrink-0">{userRole}</span>;
+    }
+  };
+
   return (
     <>
       <nav className={clsx("w-full z-40 shadow-lg", navbarBg, "sticky top-0")}>
@@ -359,6 +374,9 @@ export default function Navbar() {
 
             {/* Right Side: User Profile Trigger */}
             <div className="hidden lg:flex items-center gap-4 shrink-0">
+              <div className="flex items-center">
+                {renderRoleBadge()}
+              </div>
 
               {/* User Profile Circle Dropdown */}
               <div className="relative" ref={dropdownRef}>
@@ -367,7 +385,9 @@ export default function Navbar() {
                   className="relative flex items-center gap-3 cursor-pointer bg-white/5 py-1.5 pl-4 pr-1.5 rounded-full border border-transparent border-white/10 transition-all"
                 >
                   <div className="flex flex-col items-end text-right">
-                    <span className="text-white font-bold text-sm leading-none mb-1">{currentUser?.name || 'User'}</span>
+                    <div className="flex items-center mb-1">
+                      <span className="text-white font-bold text-sm leading-none">{currentUser?.name || 'User'}</span>
+                    </div>
                     <span className="text-white/60 text-[11px] leading-none max-w-[150px] truncate">{currentUser?.email}</span>
                   </div>
 
@@ -425,6 +445,17 @@ export default function Navbar() {
                     <button
                       onClick={() => {
                         setIsProfileDropdownOpen(false);
+                        navigate('/user-guide');
+                      }}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:text-blue-600 w-full text-left transition-colors"
+                    >
+                      <BookOpen className="w-4 h-4" />
+                      User Guide
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setIsProfileDropdownOpen(false);
                         setShowPasswordModal(true);
                       }}
                       className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:text-blue-600 w-full text-left transition-colors"
@@ -473,7 +504,10 @@ export default function Navbar() {
             isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
           )}>
             <div className="flex items-center justify-between p-4 border-b border-white/10">
-              <span className="text-white font-bold text-lg">Menu</span>
+              <div className="flex items-center">
+                {renderRoleBadge()}
+                <span className="text-white font-bold text-lg">Menu</span>
+              </div>
               <button
                 onClick={() => setIsMobileMenuOpen(false)}
                 className="text-white p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors focus:outline-none"
@@ -595,6 +629,17 @@ export default function Navbar() {
                       <span className="text-[14px]">Upgrade Plan</span>
                     </button>
                   )}
+
+                  <button
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      navigate('/user-guide');
+                    }}
+                    className="flex items-center gap-3 w-full px-4 py-3.5 rounded-xl text-white/70 hover:bg-white/5 hover:text-white font-medium transition-all"
+                  >
+                    <BookOpen className="h-[17px] w-[17px] stroke-[2px]" />
+                    <span className="text-[14px]">User Guide</span>
+                  </button>
 
                   <button
                     onClick={() => {
@@ -752,6 +797,7 @@ export default function Navbar() {
         onClose={() => setShowUpgradeModal(false)}
         currentPlan={currentPlan}
       />
+
     </>
   );
 }

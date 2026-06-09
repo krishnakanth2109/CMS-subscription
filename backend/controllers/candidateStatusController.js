@@ -1,5 +1,6 @@
 // --- START OF FILE candidateStatusController.js ---
 import Candidate from '../models/Candidate.js';
+import CandidateSubmission from '../models/CandidateSubmission.js';
 import { sendDecisionEmail } from '../services/email.js';
 import { getTenantOwnerId } from '../middleware/authMiddleware.js';
 
@@ -47,6 +48,13 @@ export const updateCandidateStatus = async (req, res) => {
       req.params.id,
       { $set: { status: newStatus, updatedBy: req.user._id } },
       { new: true, runValidators: false }
+    );
+
+    // Sync the most recent submission if it exists
+    await CandidateSubmission.findOneAndUpdate(
+      { candidateId: req.params.id, tenantOwnerId },
+      { $set: { status: newStatus } },
+      { sort: { createdAt: -1 } }
     );
 
     res.json({ message: 'Candidate status updated successfully', candidate: updated });
@@ -121,6 +129,15 @@ export const inlineUpdateCandidate = async (req, res) => {
       { $set: updateData },
       { new: true, runValidators: false }
     );
+
+    // Sync the most recent submission if status was changed
+    if (updateData.status) {
+      await CandidateSubmission.findOneAndUpdate(
+        { candidateId: req.params.id, tenantOwnerId },
+        { $set: { status: updateData.status } },
+        { sort: { createdAt: -1 } }
+      );
+    }
 
     res.json({ message: 'Candidate updated successfully', candidate: updated });
     if (updateData.status) maybeSendDecisionEmail(updated, updateData.status);

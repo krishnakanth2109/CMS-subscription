@@ -1,7 +1,13 @@
 import React from 'react';
 import {
   X, Briefcase, GraduationCap, Calendar, MapPin, Users, Building2,
+  ChevronDown, ChevronUp, Loader2
 } from 'lucide-react';
+import { ScoreBadge, MatchBreakdownBar, SkillChips, MatchReasonBox, getScoreValue, getMatchLevelClass } from './Score/ScoreComponents';
+import { useAuth } from '../context/AuthContext';
+
+const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+const API_URL = `${BASE_URL}/api`;
 
 const getHiddenFields = () => {
   try {
@@ -32,7 +38,7 @@ const getDueDays = (tatTime) => {
 
 const parseSkills = (skills) => {
   if (Array.isArray(skills)) return skills.map((s) => String(s).trim()).filter(Boolean);
-  if (typeof skills === 'string') return skills.split(',').map((s) => s.trim()).filter(Boolean);
+  if (typeof skills === 'string') return skills.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
   return [];
 };
 
@@ -58,12 +64,73 @@ const Section = ({ title, icon: Icon, children }) => (
  * @param {{ job: object, onClose: () => void, stats?: { submitted?: number, matching?: number }, hiddenFields?: string[] }} props
  */
 export default function JobDetailsModal({ job, onClose, stats, hiddenFields: hiddenFieldsProp }) {
+  const { authHeaders } = useAuth();
+  const [currentUser, setCurrentUser] = React.useState(null);
+  const [isScoring, setIsScoring] = React.useState(false);
+  const [scoredCandidates, setScoredCandidates] = React.useState(null);
+  const [expandedCandidateId, setExpandedCandidateId] = React.useState(null);
+
+  React.useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('currentUser');
+      if (stored) setCurrentUser(JSON.parse(stored));
+    } catch {}
+  }, []);
+
+  const handleScoreAll = async () => {
+    setIsScoring(true);
+    setScoredCandidates(null);
+    setExpandedCandidateId(null);
+    try {
+      // Fetch all linked candidates (submissions) for this job
+      const authHeader = await authHeaders();
+      const subRes = await fetch(`${API_URL}/submissions?jobId=${job._id || job.id}`, { headers: authHeader });
+      const submissions = await subRes.json();
+      if (!subRes.ok) throw new Error(submissions.message || 'Failed to fetch submissions');
+
+      const linkedCandidates = (Array.isArray(submissions) ? submissions : []).map(s => s.candidateId).filter(Boolean);
+      
+      if (linkedCandidates.length === 0) {
+        setScoredCandidates([]);
+        setIsScoring(false);
+        return;
+      }
+
+      const scoreRes = await fetch(`${API_URL}/score-match/bulk`, {
+        method: 'POST',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requirementId: job._id || job.id,
+          candidateIds: linkedCandidates.map(c => c._id || c.id),
+        })
+      });
+      const scorePayload = await scoreRes.json();
+      if (!scoreRes.ok) throw new Error(scorePayload.message || 'Failed to score candidates');
+
+      const candidatesById = new Map(linkedCandidates.map(c => [(c._id || c.id)?.toString(), c]));
+      const candidatesWithScores = (scorePayload.scores || []).map((scoreData) => {
+        const c = candidatesById.get(scoreData.candidateId?.toString());
+        if (!c) return null;
+        return { candidate: c, scoreData };
+      }).filter(Boolean);
+      
+      setScoredCandidates(candidatesWithScores);
+    } catch (err) {
+      console.error("Error scoring candidates:", err);
+      alert("Failed to score candidates.");
+    } finally {
+      setIsScoring(false);
+    }
+  };
+
   if (!job) return null;
 
   const hiddenFields = hiddenFieldsProp ?? getHiddenFields();
   const isHidden = (fieldId) => hiddenFields.includes(fieldId);
 
-  const skills = parseSkills(job.skills);
+  const legacySkills = parseSkills(job.skills);
+  const mandatorySkills = parseSkills(job.mandatorySkills).length ? parseSkills(job.mandatorySkills) : legacySkills;
+  const preferredSkills = parseSkills(job.preferredSkills);
   const dueDays = getDueDays(job.tatTime);
   const isActive = job.active !== false;
   const statusLabel = isActive ? 'Active' : 'Inactive';
@@ -100,9 +167,21 @@ export default function JobDetailsModal({ job, onClose, stats, hiddenFields: hid
                 </span>
               </div>
             </div>
-            <button type="button" onClick={onClose} className="p-1.5 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white shrink-0">
-              <X className="w-6 h-6" />
-            </button>
+            <div className="flex items-center gap-3 shrink-0">
+              {currentUser && ['admin', 'manager', 'master'].includes(currentUser.role) && (
+                <button
+                  type="button"
+                  onClick={handleScoreAll}
+                  disabled={isScoring}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-70 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+                >
+                  {isScoring ? <><Loader2 className="w-4 h-4 animate-spin" /> Scoring...</> : 'Score All Candidates'}
+                </button>
+              )}
+              <button type="button" onClick={onClose} className="p-1.5 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -122,11 +201,25 @@ export default function JobDetailsModal({ job, onClose, stats, hiddenFields: hid
             {/* Requirements */}
             <Section title="Requirements" icon={GraduationCap}>
               <div className="text-sm">
-                <span className="text-zinc-500 block mb-2">Required Skills</span>
-                {!isHidden('skills') && skills.length > 0 ? (
+                <span className="text-zinc-500 block mb-2">Mandatory Skills</span>
+                {!isHidden('skills') && mandatorySkills.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
-                    {skills.map((skill) => (
+                    {mandatorySkills.map((skill) => (
                       <span key={skill} className="inline-flex px-2 py-0.5 rounded-md text-xs font-medium bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200 border border-zinc-300 dark:border-zinc-600">
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="font-medium">—</span>
+                )}
+              </div>
+              <div className="text-sm">
+                <span className="text-zinc-500 block mb-2">Preferred Skills</span>
+                {!isHidden('skills') && preferredSkills.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {preferredSkills.map((skill) => (
+                      <span key={skill} className="inline-flex px-2 py-0.5 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-900/50">
                         {skill}
                       </span>
                     ))}
@@ -223,6 +316,102 @@ export default function JobDetailsModal({ job, onClose, stats, hiddenFields: hid
                 ))}
               </div>
             </div>
+          )}
+
+          {/* Scored Candidates Table */}
+          {scoredCandidates !== null && (
+            <Section title="Scored Linked Candidates" icon={Users}>
+              {scoredCandidates.length === 0 ? (
+                <p className="text-sm text-zinc-500 py-4 text-center">No candidates linked to this requirement.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800 mt-2">
+                  <table className="min-w-[700px] w-full text-left text-sm">
+                    <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-xs uppercase text-zinc-500 font-semibold">
+                      <tr>
+                        <th className="px-4 py-3">Avatar</th>
+                        <th className="px-4 py-3">Name</th>
+                        <th className="px-4 py-3">Current Role</th>
+                        <th className="px-4 py-3 text-center">Match Score</th>
+                        <th className="px-4 py-3">Match Level</th>
+                        <th className="px-4 py-3"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                      {scoredCandidates.map(({ candidate, scoreData }, idx) => {
+                        const id = candidate._id || candidate.id || idx;
+                        const name = candidate.name || `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || 'Unnamed Candidate';
+                        const avatarLetter = name.charAt(0).toUpperCase();
+                        const isExpanded = expandedCandidateId === id;
+
+                        return (
+                          <React.Fragment key={id}>
+                            <tr className={`bg-white dark:bg-zinc-900 transition-colors ${isExpanded ? 'bg-zinc-50 dark:bg-zinc-800/40' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/20'}`}>
+                              <td className="px-4 py-3 w-12">
+                                <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 flex items-center justify-center font-bold text-xs">{avatarLetter}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="font-semibold text-zinc-900 dark:text-zinc-100">{name}</div>
+                                <div className="text-xs text-zinc-400">{candidate.candidateId || candidate._id?.slice(-6).toUpperCase()}</div>
+                              </td>
+                              <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{candidate.position || '—'}</td>
+                              
+                              <td className="px-4 py-3 text-center">
+                                <ScoreBadge score={getScoreValue(scoreData)} />
+                              </td>
+                              <td className="px-4 py-3">
+                                {scoreData?.matchLevel && (
+                                  <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold border ${getMatchLevelClass(scoreData.matchLevel, true)}`}>
+                                    {scoreData.matchLevel}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                {scoreData && (
+                                  <button 
+                                    onClick={() => setExpandedCandidateId(isExpanded ? null : id)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 transition-colors"
+                                  >
+                                    {isExpanded ? 'Hide Breakdown' : 'View Breakdown'}
+                                    {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                            
+                            {isExpanded && scoreData && (
+                              <tr className="bg-zinc-50/80 dark:bg-zinc-900/50 border-t-0">
+                                <td colSpan={6} className="px-6 py-5">
+                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                    <div>
+                                      <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                                        Score Breakdown
+                                        <span className="text-xs font-normal text-zinc-500">(Out of 100)</span>
+                                      </h4>
+                                      <MatchBreakdownBar breakdown={scoreData.breakdown} />
+                                    </div>
+                                    <div className="space-y-4">
+                                      <MatchReasonBox reason={scoreData.reason} flags={scoreData.atsFlags} />
+                                      <SkillChips
+                                        matched={scoreData.matchedSkills}
+                                        missing={scoreData.missingSkills}
+                                        matchedMandatory={scoreData.matchedMandatorySkills}
+                                        missingMandatory={scoreData.missingMandatorySkills}
+                                        matchedPreferred={scoreData.matchedPreferredSkills}
+                                        missingPreferred={scoreData.missingPreferredSkills}
+                                      />
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Section>
           )}
 
         </div>

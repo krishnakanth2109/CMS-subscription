@@ -1,7 +1,7 @@
 // src/components/MasterLayout.jsx
 import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, User, LogOut, Shield, Bell } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, User, LogOut, Shield, Bell, QrCode, Building2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
@@ -18,6 +18,8 @@ export default function MasterLayout() {
     { name: 'Dashboard', path: '/master-panel', icon: <LayoutDashboard size={20} /> },
     { name: 'Admins', path: '/master-panel/managers', icon: <Users size={20} /> },
     { name: 'Demo Requests', path: '/master-panel/demo-requests', icon: <Bell size={20} />, badge: unreadDemoCount },
+    { name: 'Candidates', path: '/master-panel/candidates', icon: <Users size={20} /> },
+    { name: 'Clients', path: '/master-panel/clients', icon: <Building2 size={20} /> },
     { name: 'Plans', path: '/master-panel/plans', icon: <CreditCard size={20} /> },
     { name: 'Profile', path: '/master-panel/profile', icon: <User size={20} /> },
   ];

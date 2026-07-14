@@ -114,6 +114,11 @@
 .glass {
   @apply bg-white/70 dark:bg-[#050505]/70 backdrop-blur-xl border border-gray-200 dark:border-white/10;
 }
+/* Keyframe for inline spinner used in CandidateQRForm (public page) */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 @media print {
   body * { visibility: hidden; }
   #printable-results, #printable-results * { visibility: visible; }

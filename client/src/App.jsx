@@ -22,6 +22,9 @@ const DemoRequests = lazy(() => import('@/pages/master/DemoRequests'));
 const Managers = lazy(() => import('@/pages/master/Managers'));
 const Plans = lazy(() => import('@/pages/master/Plans'));
 const Profile = lazy(() => import('@/pages/master/Profile'));
+const AdminDetails = lazy(() => import('@/pages/master/AdminDetails'));
+const CandidateQRSubmissions = lazy(() => import('@/pages/master/CandidateQRSubmissions'));
+const ClientQRSubmissions = lazy(() => import('@/pages/master/ClientQRSubmissions'));
 
 // Admin Pages
 const AdminDashboard = lazy(() => import('@/pages/AdminDashboard'));
@@ -39,6 +42,8 @@ const AgreementGenerator = lazy(() => import('@/pages/AgreementGenerator'));
 const MockInterviewsDashboard = lazy(() => import('@/pages/MockInterviewsDashboard'));
 const InterviewSession = lazy(() => import('@/pages/InterviewSession'));
 const UserGuidePage = lazy(() => import('@/pages/UserGuidePage'));
+const CandidateQRForm = lazy(() => import('@/pages/CandidateQRForm'));
+const ClientQRForm    = lazy(() => import('@/pages/ClientQRForm'));
 
 // Manager Specific Pages
 const ManagerDashboard = lazy(() => import('@/pages/ManagerDashboard'));
@@ -106,6 +111,8 @@ function AppRoutes() {
         <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/invite" element={<InterviewSession />} />
+        <Route path="/candidate-form/:token" element={<CandidateQRForm />} />
+        <Route path="/client-form/:token"    element={<ClientQRForm />} />
         <Route path="/user-guide" element={
           <ProtectedRoute allowedRoles={['admin', 'manager', 'recruiter']}>
             <DashboardLayout />
@@ -128,6 +135,9 @@ function AppRoutes() {
           <Route index element={<MasterDashboard />} />
           <Route path="demo-requests" element={<DemoRequests />} />
           <Route path="managers" element={<Managers />} />
+          <Route path="admins/:adminId" element={<AdminDetails />} />
+          <Route path="candidates" element={<CandidateQRSubmissions />} />
+          <Route path="clients" element={<ClientQRSubmissions />} />
           <Route path="plans" element={<Plans />} />
           <Route path="profile" element={<Profile />} />
         </Route>

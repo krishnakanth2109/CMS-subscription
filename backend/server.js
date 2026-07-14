@@ -37,6 +37,8 @@ import agreementEmailRoutes     from './routes/agreementEmailRoutes.js';
 import agreementUploadRoutes    from './routes/agreementUploadRoutes.js';
 import masterRoutes             from './routes/masterRoutes.js';
 import demoRequestRoutes        from './routes/demoRequestRoutes.js';
+import candidateQRRoutes       from './routes/candidateQRRoutes.js';
+import clientQRRoutes          from './routes/clientQRRoutes.js';
 
 // ── __dirname shim for ES Modules ─────────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
@@ -158,6 +160,8 @@ app.use('/api/payments',   paymentRoutes);
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/score-match', scoreMatchRoutes);
 app.use('/api/demo-requests', demoRequestRoutes);
+app.use('/api/candidate-qr',  candidateQRRoutes);
+app.use('/api/client-qr',     clientQRRoutes);
 
 
 // Agreement module
@@ -183,6 +187,8 @@ app.use('/payments',   paymentRoutes);    // 🔹 FIXED: Added missing payment f
 app.use('/submissions', submissionRoutes);
 app.use('/master',     masterRoutes);     // 🔹 FIXED: Added missing master fallback
 app.use('/demo-requests', demoRequestRoutes);
+app.use('/candidate-qr',  candidateQRRoutes);
+app.use('/client-qr',     clientQRRoutes);
 
 app.use('/',           aiMockRoutes);
 

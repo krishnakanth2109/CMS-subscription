@@ -1,74 +1,7 @@
-import mongoose from 'mongoose';
 import Candidate from '../models/Candidate.js';
 import Job from '../models/Job.js';
 import MatchScore from '../models/MatchScore.js';
-import { getTenantOwnerId } from '../middleware/authMiddleware.js';
-import {
-  MATCH_SCORE_VERSION,
-  scoreCandidateForJob,
-  scoreCandidatesForJob,
-} from '../services/geminiMatchService.js';
-
-const FALLBACK_CACHE_TTL_MS = Number(process.env.MATCH_FALLBACK_CACHE_TTL_MS || 10 * 60 * 1000);
-
-const buildTenantQuery = (req, extra = {}) => {
-  const tenantOwnerId = getTenantOwnerId(req.user);
-  return tenantOwnerId ? { ...extra, tenantOwnerId } : extra;
-};
-
-const isValidId = (value) => mongoose.Types.ObjectId.isValid(value);
-
-const getCacheTenantId = (req) => getTenantOwnerId(req.user) || null;
-
-const isCacheFresh = (cache, candidate, requirement) => {
-  if (!cache?.result) return false;
-  if (cache.result.scoreVersion !== MATCH_SCORE_VERSION) return false;
-
-  const candidateChangedAt = candidate.updatedAt || candidate.createdAt;
-  const requirementChangedAt = requirement.updatedAt || requirement.createdAt;
-  if (candidateChangedAt && cache.candidateUpdatedAt && cache.candidateUpdatedAt < candidateChangedAt) return false;
-  if (requirementChangedAt && cache.requirementUpdatedAt && cache.requirementUpdatedAt < requirementChangedAt) return false;
-
-  if (cache.source === 'fallback') {
-    return Date.now() - new Date(cache.updatedAt || cache.createdAt).getTime() <= FALLBACK_CACHE_TTL_MS;
-  }
-
-  return true;
-};
-
-const findCachedScore = async (req, candidate, requirement) => {
-  const cache = await MatchScore.findOne({
-    tenantOwnerId: getCacheTenantId(req),
-    candidateId: candidate._id,
-    requirementId: requirement._id,
-  }).lean();
-
-  return isCacheFresh(cache, candidate, requirement) ? cache.result : null;
-};
-
-const saveScoreCache = async (req, candidate, requirement, score) => {
-  try {
-    await MatchScore.findOneAndUpdate(
-      {
-        tenantOwnerId: getCacheTenantId(req),
-        candidateId: candidate._id,
-        requirementId: requirement._id,
-      },
-      {
-        tenantOwnerId: getCacheTenantId(req),
-        candidateId: candidate._id,
-        requirementId: requirement._id,
-        candidateUpdatedAt: candidate.updatedAt || candidate.createdAt,
-        requirementUpdatedAt: requirement.updatedAt || requirement.createdAt,
-        source: score.source === 'gemini' ? 'gemini' : 'fallback',
-        result: score,
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-  } catch (error) {
-    console.warn('Match score cache save skipped:', error.message);
-  }
-};
+import { processMatchingCandidates, evaluateCandidateJobMatch } from '../services/groqMatchingService.js';
 
 export const scoreMatch = async (req, res) => {
   try {
@@ -78,127 +11,85 @@ export const scoreMatch = async (req, res) => {
       return res.status(400).json({ message: 'candidateId and requirementId are required' });
     }
 
-    if (!isValidId(candidateId) || !isValidId(requirementId)) {
-      return res.status(400).json({ message: 'Invalid candidateId or requirementId' });
-    }
-
     const [candidate, requirement] = await Promise.all([
-      Candidate.findOne(buildTenantQuery(req, { _id: candidateId })).lean(),
-      Job.findOne(buildTenantQuery(req, { _id: requirementId })).lean(),
+      Candidate.findById(candidateId).lean(),
+      Job.findById(requirementId).lean()
     ]);
 
     if (!candidate || !requirement) {
       return res.status(404).json({ message: 'Candidate or Requirement not found' });
     }
 
-    const cachedScore = await findCachedScore(req, candidate, requirement);
-    if (cachedScore) return res.json(cachedScore);
+    const score = await evaluateCandidateJobMatch(candidate, requirement);
 
-    const score = await scoreCandidateForJob(candidate, requirement);
-    await saveScoreCache(req, candidate, requirement, score);
-    res.json(score);
-  } catch (error) {
-    console.error('Error in scoreMatch:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
+    // Save cache (same format as groqMatchingService)
+    const tenantOwnerId = requirement.createdBy || req.user?._id;
+    await MatchScore.findOneAndUpdate(
+      {
+        tenantOwnerId,
+        candidateId,
+        requirementId
+      },
+      {
+        tenantOwnerId,
+        candidateId,
+        requirementId,
+        candidateUpdatedAt: candidate.updatedAt,
+        requirementUpdatedAt: requirement.updatedAt,
+        source: score.scoringSource,
+        result: score
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    return res.json(score);
+  } catch (err) {
+    console.error('[scoreMatch] single score failed:', err);
+    return res.status(500).json({ message: err.message });
   }
 };
 
 export const scoreMatchesForRequirement = async (req, res) => {
   try {
-    const { candidateIds, requirementId } = req.body;
+    const { candidateIds = [], requirementId } = req.body;
 
-    if (!requirementId || !Array.isArray(candidateIds)) {
-      return res.status(400).json({ message: 'requirementId and candidateIds are required' });
+    if (!requirementId) {
+      return res.status(400).json({ message: 'requirementId is required' });
     }
 
-    const uniqueCandidateIds = [...new Set(candidateIds.map((id) => id?.toString()).filter(Boolean))];
-    if (!isValidId(requirementId) || uniqueCandidateIds.some((id) => !isValidId(id))) {
-      return res.status(400).json({ message: 'Invalid requirementId or candidateIds' });
-    }
-
-    const requirement = await Job.findOne(buildTenantQuery(req, { _id: requirementId })).lean();
+    const requirement = await Job.findById(requirementId).lean();
     if (!requirement) {
-      return res.status(404).json({ message: 'Requirement not found' });
+      return res.status(404).json({ message: 'Job requirement not found' });
     }
 
-    if (uniqueCandidateIds.length === 0) {
+    const ids = Array.isArray(candidateIds) ? candidateIds.filter(Boolean) : [];
+    if (!ids.length) {
       return res.json({ requirementId, scores: [] });
     }
 
-    const candidates = await Candidate.find(
-      buildTenantQuery(req, { _id: { $in: uniqueCandidateIds } })
-    ).lean();
-
-    if (candidates.length === 0) {
-      return res.json({ requirementId, scores: [] });
+    const query = { _id: { $in: ids } };
+    if (req.user && req.user.role !== 'admin' && req.user.role !== 'manager') {
+      query.recruiterId = req.user._id;
     }
 
-    const cacheDocs = await MatchScore.find({
-      tenantOwnerId: getCacheTenantId(req),
+    const candidates = await Candidate.find(query).lean();
+
+    const matchResult = await processMatchingCandidates(candidates, requirement, req.user);
+    const scores = matchResult.candidates;
+
+    return res.json({
       requirementId,
-      candidateId: { $in: candidates.map((candidate) => candidate._id) },
-    }).lean();
-
-    const candidateById = new Map(candidates.map((candidate) => [candidate._id.toString(), candidate]));
-    const cacheByCandidateId = new Map(cacheDocs.map((cache) => [cache.candidateId.toString(), cache]));
-    const scores = [];
-    const candidatesToScore = [];
-
-    candidates.forEach((candidate) => {
-      const cache = cacheByCandidateId.get(candidate._id.toString());
-      if (isCacheFresh(cache, candidate, requirement)) {
-        scores.push(cache.result);
-      } else {
-        candidatesToScore.push(candidate);
-      }
+      success: true,
+      totalEvaluated: matchResult.totalEvaluated,
+      locallyRejected: matchResult.locallyRejected,
+      aiScored: matchResult.aiScored,
+      cached: matchResult.cached,
+      failed: matchResult.failed,
+      candidates: scores,
+      scores
     });
-
-    if (candidatesToScore.length > 0) {
-      const newScores = await scoreCandidatesForJob(candidatesToScore, requirement);
-      scores.push(...newScores);
-
-      const writes = newScores.map((score) => {
-        const candidate = candidateById.get(score.candidateId?.toString());
-        if (!candidate) return null;
-        return {
-          updateOne: {
-            filter: {
-              tenantOwnerId: getCacheTenantId(req),
-              candidateId: candidate._id,
-              requirementId: requirement._id,
-            },
-            update: {
-              $set: {
-                tenantOwnerId: getCacheTenantId(req),
-                candidateId: candidate._id,
-                requirementId: requirement._id,
-                candidateUpdatedAt: candidate.updatedAt || candidate.createdAt,
-                requirementUpdatedAt: requirement.updatedAt || requirement.createdAt,
-                source: score.source === 'gemini' ? 'gemini' : 'fallback',
-                result: score,
-              },
-            },
-            upsert: true,
-          },
-        };
-      }).filter(Boolean);
-
-      if (writes.length > 0) {
-        try {
-          await MatchScore.bulkWrite(writes, { ordered: false });
-        } catch (error) {
-          console.warn('Match score bulk cache save skipped:', error.message);
-        }
-      }
-    }
-
-    scores.sort((a, b) => (b.matchPercentage || 0) - (a.matchPercentage || 0));
-    res.json({
-      requirementId,
-      scores,
-    });
-  } catch (error) {
-    console.error('Error in scoreMatchesForRequirement:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
+  } catch (err) {
+    console.error('[scoreMatch] bulk score failed:', err);
+    return res.status(500).json({ message: err.message });
   }
 };

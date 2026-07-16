@@ -1,6 +1,7 @@
 import CandidateSubmission from '../models/CandidateSubmission.js';
 import Candidate from '../models/Candidate.js';
 import Client from '../models/Client.js';
+import Job from '../models/Job.js';
 import { getTenantOwnerId } from '../middleware/authMiddleware.js';
 
 // @desc    Create a candidate-client assignment (submission)
@@ -8,9 +9,24 @@ import { getTenantOwnerId } from '../middleware/authMiddleware.js';
 export const createSubmission = async (req, res) => {
   try {
     const tenantOwnerId = getTenantOwnerId(req.user);
-    const { candidateId, clientId, jobId, remarks } = req.body;
+    const { candidateId, clientId, jobId, clientName, remarks } = req.body;
 
-    if (!candidateId || !clientId || !jobId) {
+    let resolvedClientId = clientId;
+    if (!resolvedClientId) {
+      let cName = clientName;
+      if (!cName && jobId) {
+        const job = await Job.findById(jobId);
+        if (job) cName = job.clientName;
+      }
+      if (cName) {
+        const clientDoc = await Client.findOne({ companyName: cName, tenantOwnerId });
+        if (clientDoc) {
+          resolvedClientId = clientDoc._id;
+        }
+      }
+    }
+
+    if (!candidateId || !resolvedClientId || !jobId) {
       return res.status(400).json({ message: 'candidateId, clientId, and jobId are required' });
     }
 
@@ -21,13 +37,13 @@ export const createSubmission = async (req, res) => {
     }
 
     // Verify client exists under this tenant
-    const client = await Client.findOne({ _id: clientId, tenantOwnerId });
+    const client = await Client.findOne({ _id: resolvedClientId, tenantOwnerId });
     if (!client) {
       return res.status(404).json({ message: 'Client not found' });
     }
 
     // Check if duplicate submission already exists
-    const query = { tenantOwnerId, candidateId, clientId };
+    const query = { tenantOwnerId, candidateId, clientId: resolvedClientId };
     if (jobId) query.jobId = jobId;
     
     const existing = await CandidateSubmission.findOne(query);
@@ -38,7 +54,7 @@ export const createSubmission = async (req, res) => {
     const newSubmission = new CandidateSubmission({
       tenantOwnerId,
       candidateId,
-      clientId,
+      clientId: resolvedClientId,
       clientName: client.companyName,
       jobId: jobId || null,
       remarks: remarks || '',

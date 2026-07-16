@@ -1,194 +1,37 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Textarea } from '@/components/ui/textarea';
 import * as XLSX from 'xlsx';
 import {
-  Search, Plus, Eye, Loader2,
+  Search, Plus, Eye, Loader2, MessageCircle,
   ArrowUpDown, ArrowUp, ArrowDown, Users, Download,
-  X, Edit, Trash2, Calendar, ChevronDown, ChevronUp,
-  CheckCircle2, FileText, Sparkles, Settings2, Check, GripVertical,
-  Clock, Ban, FileSpreadsheet, Building, Award, Briefcase
+  X, Edit, Trash2, Ban, List, LayoutGrid, Calendar,
+  GraduationCap, Award, UserCircle, Target, IndianRupee,
+  Upload, FileUp, AlertTriangle, FileSpreadsheet, Linkedin,
+  Building, Mail, Phone, Briefcase, UserPlus,
+  CheckCircle2, FileText, Sparkles, SlidersHorizontal
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { ScoreBadge, MatchBreakdownBar, SkillChips, MatchReasonBox, getScoreValue, getMatchLevelClass } from '@/components/Score/ScoreComponents';
-
-// ── Inline Excel Import Logic ─────────────────────────────────────────────────
-const _FIELD_ALIASES = {
-  firstName: ['first name','firstname','first_name','given name','givenname','candidate name','name','full name','fullname','candidate_name'],
-  lastName:  ['last name','lastname','last_name','surname','family name','familyname'],
-  email:     ['email','email address','emailaddress','e-mail','e_mail','mail','email id','emailid'],
-  contact:   ['phone','phone number','phonenumber','mobile','mobile number','mobilenumber','contact','contact number','contactnumber','mobileno','phoneno','cellphone','cell','contactno'],
-  alternateNumber: ['alternate number','alternatenumber','alternate phone','alternate mobile','alt number','altnumber','alt phone','secondary phone','secondaryphone','other number','othernumber'],
-  dateOfBirth: ['date of birth','dateofbirth','dob','birth date','birthdate','birthday','date of birth (dd/mm/yyyy)','dob (dd/mm/yyyy)'],
-  gender:     ['gender','sex'],
-  linkedin:   ['linkedin','linkedin url','linkedinurl','linkedin profile','linkedinprofile','linkedin id','linkedinid'],
-  currentLocation:   ['current location','currentlocation','location','city','present location','presentlocation','place','loc'],
-  preferredLocation: ['preferred location','preferredlocation','preferred city','preferredcity','pref location','preflocation','job city','jobcity'],
-  position: ['position','position applied','positionapplied','role','job title','jobtitle','designation','jobposition','job position','applied for','appliedfor','applied position','appliedposition'],
-  client:   ['client','client name','clientname','company','company name','companyname','organization','organisation','hiring client','hiringclient'],
-  currentCompany: ['current company','currentcompany','present company','presentcompany','employer','current employer','currentemployer','working at','workingat','current organization','currentorganization'],
-  industry:  ['industry','sector','domain','industry type','industrytype'],
-  skills:    ['skills','skill set','skillset','technologies','techstack','tech stack','technical skills','technicalskills','key skills','keyskills'],
-  education: ['education','qualification','degree','highest qualification','highestqualification','academic qualification','academicqualification','educational qualification','educationalqualification'],
-  totalExperience:    ['total experience','totalexperience','experience','exp','years of experience','yearsofexperience','total exp','totalexp','total years','totalyears','yoe'],
-  relevantExperience: ['relevant experience','relevantexperience','relevant exp','relevantexp','related experience','relatedexperience','rel exp','relexp'],
-  ctc:  ['ctc','current ctc','currentctc','current salary','currentsalary','current package','currentpackage','current cost','currentcost'],
-  ectc: ['ectc','expected ctc','expectedctc','expected salary','expectedsalary','expected package','expectedpackage','ctc expected','exp ctc','expctc','salary','expected cost','expectedcost'],
-  currentTakeHome:  ['current take home','currenttakehome','take home','takehome','take home salary','takehomesalary','in hand','inhand','net salary','netsalary','in hands','inhands'],
-  expectedTakeHome: ['expected take home','expectedtakehome','expected in hand','expectedinhand','expected net salary','expectednetsalary'],
-  noticePeriod:        ['notice period','noticeperiod','notice','availability','np','notice time','noticetime','notice duration','noticeduration'],
-  servingNoticePeriod: ['serving notice','servingnotice','serving notice period','servingnoticeperiod','currently serving','currentlyserving','on notice','onnotice'],
-  noticePeriodDays:    ['notice period days','noticeperioddays','days remaining','daysremaining','notice days','noticedays'],
-  lwd: ['lwd','last working day','lastworkingday','last day','lastday','last date','lastdate'],
-  offersInHand:    ['offers in hand','offersinhand','offer in hand','offerinhand','has offer','hasoffer','competing offer','competingoffer'],
-  offerPackage:    ['offer package','offerpackage','offer amount','offeramount','competing package','competingpackage','offer ctc','offerctc'],
-  reasonForChange: ['reason for change','reasonforchange','reason for leaving','reasonforleaving','reason','motivation'],
-  source:  ['source','candidate source','candidatesource','reference','referral','source of candidate','sourceofcandidate','sourced from','sourcedfrom'],
-  status:  ['status','candidate status','candidatestatus','current status','currentstatus','stage','pipeline stage','pipelinestage'],
-  rating:  ['rating','candidate rating','candidaterating','score','stars'],
-  dateAdded: ['date added','dateadded','submission date','submissiondate','added on','addedon','entry date','entrydate'],
-  notes:   ['notes','note','internal notes','internalnotes','comment','comments'],
-  remarks: ['remarks','remark','feedback','observation','interviewer remarks','hr remarks','additional comments','additionalcomments'],
-  resumeUrl: ['resume url','resumeurl','resume link','resumelink','cv link','cvlink','cv url','cvurl','portfolio','resume','profile link','profilelink'],
-};
-const _VALID_IMPORT_STATUSES = ['Submitted','Shared Profiles','Yet to attend','Turnups','No Show','Selected','Joined','Rejected','Pipeline','Hold','Backout'];
-const _norm = (s) => (s||'').toLowerCase().replace(/[\s_\-.]+/g,'');
-const _findCol = (headers, field) => {
-  const aliases = (_FIELD_ALIASES[field]||[]).map(_norm);
-  for (const h of headers) if (aliases.includes(_norm(h))) return h;
-  for (const h of headers) { const nh=_norm(h); for (const a of aliases) if (a.length>=4&&nh.startsWith(a)) return h; }
-  for (const h of headers) { const nh=_norm(h); for (const a of aliases) if (a.length>=5&&nh.includes(a)) return h; }
-  return null;
-};
-const _getVal = (row, key) => {
-  if (!key || !(key in row)) return '';
-  const v = row[key];
-  if (v===null||v===undefined) return '';
-  if (typeof v==='number') { const s=v.toString(); if (/e[+-]/i.test(s)) return Math.round(v).toString(); return s; }
-  if (v instanceof Date) return v.toISOString().split('T')[0];
-  return String(v).trim();
-};
-const _splitName = (full) => { const p=(full||'').trim().split(/\s+/); if(!p[0]) return {firstName:'',lastName:''}; if(p.length===1) return {firstName:p[0],lastName:p[0]}; return {firstName:p[0],lastName:p.slice(1).join(' ')}; };
-const _san = (s) => String(s||'').replace(/<[^>]*>/g,'').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'').trim();
-const _ALLOWED_EXTS = new Set(['.xlsx','.xls','.csv']);
-const _ALLOWED_TYPES = new Set(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel','text/csv','text/plain','application/csv']);
-const isValidFileType = (file) => { const ext=file.name.substring(file.name.lastIndexOf('.')).toLowerCase(); return _ALLOWED_TYPES.has(file.type)||_ALLOWED_EXTS.has(ext); };
-const parseExcelToCandidates = (file, onProgress) => new Promise((resolve, reject) => {
-  if (!isValidFileType(file)) return reject(new Error('Invalid file type. Only .xlsx, .xls, and .csv are supported.'));
-  const reader = new FileReader();
-  reader.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded/e.total)*40)); };
-  reader.onload = (e) => {
-    try {
-      if (onProgress) onProgress(50);
-      const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array',cellDates:true,raw:false});
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:'',raw:false});
-      if (!rows||rows.length===0) return reject(new Error('File is empty or has no data rows.'));
-      const headers = Object.keys(rows[0]||{});
-      if (!headers.length) return reject(new Error('No recognisable column headers found.'));
-      if (onProgress) onProgress(60);
-      const cols = {}; Object.keys(_FIELD_ALIASES).forEach(f => { cols[f]=_findCol(headers,f); });
-      const hasFirst=!!cols.firstName, hasLast=!!cols.lastName, hasFullOnly=!hasFirst&&!hasLast;
-      const fullNameKey = hasFullOnly ? headers.find(h=>['name','fullname','candidatename'].includes(_norm(h))) : null;
-      if (onProgress) onProgress(70);
-      const validRows=[], invalidRows=[], allRows=[];
-      rows.forEach((row, idx) => {
-        const rowErrors=[];
-        let firstName='', lastName='';
-        if (hasFirst||hasLast) {
-          firstName=_san(_getVal(row,cols.firstName)); lastName=_san(_getVal(row,cols.lastName));
-          if (firstName&&!lastName&&firstName.includes(' ')) { const s=_splitName(firstName); firstName=s.firstName; lastName=s.lastName; }
-        } else if (hasFullOnly&&fullNameKey) { const s=_splitName(_san(_getVal(row,fullNameKey))); firstName=s.firstName; lastName=s.lastName; }
-        if (!firstName||firstName.length<2) rowErrors.push('First Name is required (min 2 chars)');
-        const email=_san(_getVal(row,cols.email)).toLowerCase();
-        if (!email) rowErrors.push('Email is required');
-        else if (!/^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(email)) rowErrors.push('Invalid Email format');
-        const contact=_getVal(row,cols.contact).replace(/\D/g,'').slice(-10);
-        if (!contact) rowErrors.push('Phone is required');
-        else if (contact.length!==10) rowErrors.push(`Phone must be 10 digits (got: ${contact})`);
-        const position=_san(_getVal(row,cols.position));
-        if (!position) rowErrors.push('Position (Role) is required');
-        const client=_san(_getVal(row,cols.client));
-        const skillsRaw=_san(_getVal(row,cols.skills));
-        const skills=skillsRaw ? skillsRaw.split(/[,;|]+/).map(s=>s.trim()).filter(Boolean) : [];
-        let statusArr=[];
-        const statusRaw=_san(_getVal(row,cols.status));
-        if (statusRaw) statusArr=statusRaw.split(/[,;|]+/).map(s=>s.trim()).filter(s=>_VALID_IMPORT_STATUSES.includes(s));
-        if (!statusArr.length) statusArr=['Submitted'];
-        const servingRaw=_san(_getVal(row,cols.servingNoticePeriod)).toLowerCase();
-        const offersRaw=_san(_getVal(row,cols.offersInHand)).toLowerCase();
-        const isTruthy=(v)=>['yes','true','1','y'].includes(v);
-        const ratingRaw=_san(_getVal(row,cols.rating));
-        const parsed = {
-          _rowNum: idx+1, firstName, lastName, email, contact, position, client, skills, status: statusArr,
-          alternateNumber: _san(_getVal(row,cols.alternateNumber)).replace(/\D/g,'').slice(-10)||'',
-          dateOfBirth: _san(_getVal(row,cols.dateOfBirth))||'', gender: _san(_getVal(row,cols.gender))||'',
-          linkedin: _san(_getVal(row,cols.linkedin))||'',
-          currentLocation: _san(_getVal(row,cols.currentLocation))||'', preferredLocation: _san(_getVal(row,cols.preferredLocation))||'',
-          currentCompany: _san(_getVal(row,cols.currentCompany))||'', industry: _san(_getVal(row,cols.industry))||'',
-          education: _san(_getVal(row,cols.education))||'',
-          totalExperience: _san(_getVal(row,cols.totalExperience))||'', relevantExperience: _san(_getVal(row,cols.relevantExperience))||'',
-          ctc: _san(_getVal(row,cols.ctc))||'', ectc: _san(_getVal(row,cols.ectc))||'',
-          currentTakeHome: _san(_getVal(row,cols.currentTakeHome))||'', expectedTakeHome: _san(_getVal(row,cols.expectedTakeHome))||'',
-          noticePeriod: _san(_getVal(row,cols.noticePeriod))||'',
-          servingNoticePeriod: isTruthy(servingRaw)?'true':'false',
-          noticePeriodDays: _san(_getVal(row,cols.noticePeriodDays))||'', lwd: _san(_getVal(row,cols.lwd))||'',
-          reasonForChange: _san(_getVal(row,cols.reasonForChange))||'',
-          offersInHand: isTruthy(offersRaw)?'true':'false', offerPackage: _san(_getVal(row,cols.offerPackage))||'',
-          source: _san(_getVal(row,cols.source))||'Excel Import',
-          rating: ratingRaw ? Math.min(5,Math.max(0,parseInt(ratingRaw)||0)) : 0,
-          dateAdded: _san(_getVal(row,cols.dateAdded))||new Date().toISOString().split('T')[0],
-          notes: _san(_getVal(row,cols.notes))||'', remarks: _san(_getVal(row,cols.remarks))||'',
-          resumeUrl: _san(_getVal(row,cols.resumeUrl))||'',
-        };
-        const entry={...parsed,valid:rowErrors.length===0,errors:rowErrors};
-        allRows.push(entry);
-        if (rowErrors.length===0) validRows.push(entry); else invalidRows.push(entry);
-      });
-      if (onProgress) onProgress(100);
-      resolve({validRows,invalidRows,allRows,totalCount:rows.length});
-    } catch(err) { reject(new Error(`Failed to parse file: ${err.message}`)); }
-  };
-  reader.onerror = () => reject(new Error('Failed to read file.'));
-  reader.readAsArrayBuffer(file);
-});
-const downloadCandidateTemplate = () => {
-  const headers = ['First Name *','Last Name *','Email *','Phone *','Position *','Client *','Skills *','Alternate Number','Date of Birth','Gender','LinkedIn URL','Current Location','Preferred Location','Current Company','Industry','Education','Total Experience','Relevant Experience','Current CTC','Expected CTC','Current Take Home','Expected Take Home','Notice Period','Serving Notice','LWD','Reason For Change','Offers In Hand','Offer Package','Source','Status','Rating','Date Added','Remarks','Notes'];
-  const today = new Date().toISOString().split('T')[0];
-  const sampleRows = [
-    {'First Name *':'Rahul','Last Name *':'Sharma','Email *':'rahul.sharma@example.com','Phone *':'9876543210','Position *':'Frontend Developer','Client *':'Acme Corp','Skills *':'React, TypeScript, Node.js','Alternate Number':'8765432109','Date of Birth':'1995-06-15','Gender':'Male','LinkedIn URL':'https://linkedin.com/in/rahul-sharma','Current Location':'Bangalore','Preferred Location':'Hyderabad','Current Company':'Infosys','Industry':'IT Services','Education':'B.Tech Computer Science - VIT 2017','Total Experience':'5 yrs 6 months','Relevant Experience':'4 yrs 0 months','Current CTC':'8 LPA','Expected CTC':'12 LPA','Current Take Home':'55000','Expected Take Home':'80000','Notice Period':'30 Days','Serving Notice':'No','LWD':'','Reason For Change':'Better growth','Offers In Hand':'No','Offer Package':'','Source':'LinkedIn','Status':'Submitted','Rating':'4','Date Added':today,'Remarks':'Strong React skills','Notes':'Follow up next week'},
-    {'First Name *':'Priya','Last Name *':'Nair','Email *':'priya.nair@example.com','Phone *':'9123456780','Position *':'Java Developer','Client *':'TechStart Inc','Skills *':'Java, Spring Boot, Microservices','Alternate Number':'','Date of Birth':'1993-03-22','Gender':'Female','LinkedIn URL':'https://linkedin.com/in/priya-nair','Current Location':'Chennai','Preferred Location':'Chennai','Current Company':'Wipro','Industry':'IT & Software','Education':'M.Tech - Anna University 2015','Total Experience':'7 yrs 2 months','Relevant Experience':'5 yrs 0 months','Current CTC':'12 LPA','Expected CTC':'17 LPA','Current Take Home':'80000','Expected Take Home':'110000','Notice Period':'60 Days','Serving Notice':'Yes','LWD':'2026-07-15','Reason For Change':'Seeking senior role','Offers In Hand':'Yes','Offer Package':'16 LPA','Source':'Portal','Status':'Submitted','Rating':'5','Date Added':today,'Remarks':'Excellent candidate','Notes':'Prefers hybrid work'},
-  ];
-  const ws = XLSX.utils.json_to_sheet(sampleRows, {header: headers});
-  ws['!cols'] = headers.map(h=>({wch:Math.max(h.length+4,20)}));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Candidates');
-  const infoRows = [
-    {Column:'First Name *',Required:'YES',Notes:'Min 2 chars. Or use "Full Name" column — auto-split.'},
-    {Column:'Last Name *',Required:'YES',Notes:'Not needed if "Full Name" is used.'},
-    {Column:'Email *',Required:'YES',Notes:'Valid email. Duplicates are skipped.'},
-    {Column:'Phone *',Required:'YES',Notes:'Exactly 10 digits.'},
-    {Column:'Position *',Required:'YES',Notes:'Job title / role applied for.'},
-    {Column:'Client *',Required:'YES',Notes:'Client / company name.'},
-    {Column:'Skills *',Required:'YES',Notes:'Comma-separated skills.'},
-    {Column:'Status',Required:'No',Notes:'Defaults to Submitted. Options: Submitted, Pipeline, Shared Profiles, Yet to attend, Turnups, Selected, Hold, Rejected, No Show, Backout, Joined.'},
-    {Column:'Serving Notice',Required:'No',Notes:'Yes / No.'},
-    {Column:'Offers In Hand',Required:'No',Notes:'Yes / No.'},
-    {Column:'Rating',Required:'No',Notes:'1 to 5.'},
-    {Column:'Date Added',Required:'No',Notes:'Defaults to today. YYYY-MM-DD.'},
-  ];
-  const wsInfo = XLSX.utils.json_to_sheet(infoRows, {header:['Column','Required','Notes']});
-  wsInfo['!cols'] = [{wch:28},{wch:10},{wch:70}];
-  XLSX.utils.book_append_sheet(wb, wsInfo, 'Field Reference');
-  XLSX.writeFile(wb, 'candidate_import_template.xlsx');
-};
-// ─────────────────────────────────────────────────────────────────────────────
-
+import CandidateProfileLink from '@/components/CandidateProfileLink';
+import { ScoreBadge, MatchBreakdownBar, SkillChips } from '@/components/Score/ScoreComponents';
+import BulkCandidateImportModal from '@/components/BulkCandidateImportModal';
+import CandidateExportModal from '@/components/CandidateExportModal';
+import ClientJobSubmissions from '@/components/ClientJobSubmissions';
+import CandidatePipelinePanel from '@/components/CandidatePipelinePanel';
+import { RecruiterDetailsTrigger } from '@/components/RecruiterDetailsModal';
+import CandidateKeywordSearch from '@/components/CandidateKeywordSearch';
+import JobDetailsModal from '@/components/JobDetailsModal';
+import JobInvitationModal from '@/components/JobInvitationModal';
+import { candidateMatchesKeywordBadges } from '@/utils/candidateSearch';
 
 // ── ENV Config ────────────────────────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 const API_URL = `${BASE_URL}/api`;
 
-const parseSearchTerms = (searchText) =>
-  [...new Set(searchText.toLowerCase().split(/[,\s]+/).map(term => term.trim()).filter(Boolean))];
+const ModalPortal = ({ children }) => {
+  if (typeof document === 'undefined') return children;
+  return createPortal(children, document.body);
+};
 
 const getAuthHeader = () => {
   try {
@@ -203,628 +46,1035 @@ const getAuthHeader = () => {
   }
 };
 
-const getCurrentUser = () => {
-  try {
-    const stored = sessionStorage.getItem('currentUser');
-    return stored ? JSON.parse(stored) : null;
-  } catch {
-    return null;
-  }
-};
-
-const getTenantSettings = () => {
-  const user = getCurrentUser();
-  return user?.candidateSettings || { hiddenFields: [], customFields: [] };
-};
-
 const inputCls = (err) =>
   `w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 ${err ? 'border-red-500' : 'border-slate-200 dark:border-slate-700'
   } bg-white dark:bg-slate-800`;
 
-// ── Optional Fields that can be hidden ────────────────────────────────────────
-const OPTIONAL_STANDARD_FIELDS = [
-  { id: 'alternateNumber',    label: 'Alternate Number' },
-  { id: 'currentLocation',    label: 'Current Location' },
-  { id: 'preferredLocation',  label: 'Preferred Location' },
-  { id: 'dateOfBirth',        label: 'Date of Birth' },
-  { id: 'gender',             label: 'Gender' },
-  { id: 'linkedin',           label: 'LinkedIn' },
-  { id: 'currentCompany',     label: 'Current Company' },
-  { id: 'industry',           label: 'Industry' },
-  { id: 'education',          label: 'Educational Qualification' },
-  { id: 'reasonForChange',    label: 'Reason for Change' },
-  { id: 'totalExperience',    label: 'Total Experience' },
-  { id: 'relevantExperience', label: 'Relevant Experience' },
-  { id: 'ctc',                label: 'Current CTC' },
-  { id: 'currentTakeHome',    label: 'Current Take Home' },
-  { id: 'ectc',               label: 'Expected CTC' },
-  { id: 'expectedTakeHome',   label: 'Expected Take Home' },
-  { id: 'noticePeriod',       label: 'Notice Period' },
-  { id: 'servingNoticePeriod',label: 'Serving Notice Period?' },
-  { id: 'lwd',                label: 'Last Working Day (LWD)' },
-  { id: 'offersInHand',       label: 'Offers In Hand' },
+const normalizeSkills = (skills) => {
+  const raw = Array.isArray(skills) ? skills : String(skills || '').split(/[,;\n]+/);
+  const seen = new Set();
+  return raw
+    .map((skill) => String(skill || '').trim())
+    .filter(Boolean)
+    .filter((skill) => {
+      const key = skill.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+};
+
+const DEFAULT_CANDIDATE_FIELD_CONFIG = [
+  { fieldName: 'firstName', label: 'First Name', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'lastName', label: 'Last Name', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'contact', label: 'Contact Number', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'alternateNumber', label: 'Alternate Number', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'email', label: 'Email Address', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'currentLocation', label: 'Current Location', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'preferredLocation', label: 'Preferred Location', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'dateOfBirth', label: 'Date of Birth', fieldType: 'date', visible: true, isDefault: true },
+  { fieldName: 'dateAdded', label: 'Date Added', fieldType: 'date', visible: true, isDefault: true },
+  { fieldName: 'position', label: 'Current Role', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'client', label: 'Client / Target Company', fieldType: 'select', visible: true, isDefault: true },
+  { fieldName: 'currentCompany', label: 'Current Company', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'reasonForChange', label: 'Reason for Change', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'totalExperience', label: 'Total Experience', fieldType: 'number', visible: true, isDefault: true },
+  { fieldName: 'relevantExperience', label: 'Relevant Experience', fieldType: 'number', visible: true, isDefault: true },
+  { fieldName: 'skills', label: 'Skills', fieldType: 'textarea', visible: true, isDefault: true },
+  { fieldName: 'education', label: 'Qualification', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'ctc', label: 'Current CTC', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'currentTakeHome', label: 'Current Take Home', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'ectc', label: 'Expected CTC', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'expectedTakeHome', label: 'Expected Take Home', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'noticePeriod', label: 'Notice Period', fieldType: 'text', visible: true, isDefault: true },
+  { fieldName: 'servingNoticePeriod', label: 'Serving Notice Period', fieldType: 'boolean', visible: true, isDefault: true },
+  { fieldName: 'offersInHand', label: 'Offer in Hand', fieldType: 'boolean', visible: true, isDefault: true },
+  { fieldName: 'source', label: 'Source', fieldType: 'select', visible: true, isDefault: true },
+  { fieldName: 'status', label: 'Status', fieldType: 'select', visible: true, isDefault: true },
+  { fieldName: 'recruiterId', label: 'Assign to User', fieldType: 'select', visible: true, isDefault: true },
+  { fieldName: 'remarks', label: 'Remarks', fieldType: 'textarea', visible: true, isDefault: true },
 ];
 
-// ── StatCard ──────────────────────────────────────────────────────────────────
-const StatCard = ({ title, value, colorTheme, active, onClick, icon: Icon }) => {
+const REQUIRED_CANDIDATE_FIELD_NAMES = new Set(['firstName', 'lastName', 'contact', 'email', 'position', 'skills', 'status']);
+
+const normalizeCandidateFieldConfig = (config = {}) => {
+  const storedFields = Array.isArray(config.fields) ? config.fields : [];
+  const storedCustomFields = Array.isArray(config.customFields) ? config.customFields : [];
+  return {
+    fields: DEFAULT_CANDIDATE_FIELD_CONFIG.map((field) => {
+      const stored = storedFields.find(item => item.fieldName === field.fieldName) || {};
+      const isMandatory = field.fieldName === 'client'
+        ? false
+        : REQUIRED_CANDIDATE_FIELD_NAMES.has(field.fieldName) || Boolean(stored.isMandatory);
+      return { ...field, ...stored, isDefault: true, isMandatory, visible: isMandatory ? true : stored.visible ?? field.visible };
+    }),
+    customFields: storedCustomFields.map(field => ({ ...field, isDefault: false, isMandatory: Boolean(field.isMandatory), visible: field.visible !== false })),
+  };
+};
+
+const getCandidateFieldConfig = () => {
+  try {
+    const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    return normalizeCandidateFieldConfig(user?.candidateSettings || { fields: DEFAULT_CANDIDATE_FIELD_CONFIG, customFields: [] });
+  } catch {
+    return normalizeCandidateFieldConfig({ fields: DEFAULT_CANDIDATE_FIELD_CONFIG, customFields: [] });
+  }
+};
+
+const saveCandidateFieldConfig = (updated) => {
+  try {
+    const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    user.candidateSettings = normalizeCandidateFieldConfig(updated);
+    sessionStorage.setItem('currentUser', JSON.stringify(user));
+  } catch (e) {
+    console.error('Candidate config save failed', e);
+  }
+};
+
+const CandidateCustomFieldInput = ({ field, value, onChange }) => {
+  const handle = (e) => onChange(field.fieldName, e.target.value);
+  if (field.fieldType === 'boolean') {
+    return (
+      <select value={value ?? ''} onChange={handle} className={inputCls(false)}>
+        <option value="">Select</option><option value="true">Yes</option><option value="false">No</option>
+      </select>
+    );
+  }
+  if (field.fieldType === 'textarea') {
+    return <Textarea value={value ?? ''} onChange={handle} className={inputCls(false)} rows={3} />;
+  }
+  if (field.fieldType === 'select') {
+    return (
+      <select value={value ?? ''} onChange={handle} className={inputCls(false)}>
+        <option value="">Select</option>
+        {(field.options || []).map(option => <option key={option} value={option}>{option}</option>)}
+      </select>
+    );
+  }
+  return <input type={field.fieldType === 'date' ? 'date' : field.fieldType === 'number' ? 'number' : 'text'} value={value ?? ''} onChange={handle} className={inputCls(false)} />;
+};
+
+const CandidateFormControlModal = ({ isOpen, onClose, config, onConfigChange }) => {
+  const [editingIndex, setEditingIndex] = useState(null);
+  const [newField, setNewField] = useState({ label: '', fieldType: 'text', options: '' });
+  if (!isOpen) return null;
+
+  const toggleDefault = (i) => {
+    const updated = { ...config, fields: [...config.fields] };
+    if (updated.fields[i].isMandatory) return;
+    updated.fields[i] = { ...updated.fields[i], visible: !updated.fields[i].visible };
+    onConfigChange(updated);
+  };
+  const toggleCustom = (i) => {
+    const updated = { ...config, customFields: [...config.customFields] };
+    updated.customFields[i] = { ...updated.customFields[i], visible: !updated.customFields[i].visible };
+    onConfigChange(updated);
+  };
+  const editCustomLabel = (i, value) => {
+    const updated = { ...config, customFields: [...config.customFields] };
+    updated.customFields[i] = { ...updated.customFields[i], label: value };
+    onConfigChange(updated);
+  };
+  const deleteCustom = (i) => onConfigChange({ ...config, customFields: config.customFields.filter((_, idx) => idx !== i) });
+  const addCustomField = () => {
+    if (!newField.label.trim()) return;
+    const baseName = newField.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'custom_field';
+    const existing = new Set([...config.fields, ...config.customFields].map(field => field.fieldName));
+    let fieldName = baseName;
+    let suffix = 2;
+    while (existing.has(fieldName)) { fieldName = `${baseName}_${suffix}`; suffix += 1; }
+    const entry = {
+      fieldName, label: newField.label.trim(), fieldType: newField.fieldType,
+      isDefault: false, isMandatory: false, visible: true,
+      ...(newField.fieldType === 'select' && { options: newField.options.split(',').map(option => option.trim()).filter(Boolean) }),
+    };
+    onConfigChange({ ...config, customFields: [...config.customFields, entry] });
+    setNewField({ label: '', fieldType: 'text', options: '' });
+  };
+
+  const visibleDefaultCount = config.fields.filter(field => field.visible).length;
+  const visibleCustomCount = config.customFields.filter(field => field.visible).length;
+
+  return (
+    <ModalPortal>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-955/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-slate-50 rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] overflow-y-auto lg:overflow-hidden border border-slate-200" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-white px-6 py-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center"><SlidersHorizontal className="w-5 h-5" /></span>
+            <div><h2 className="text-xl font-bold text-slate-900">Candidate Form Control</h2><p className="text-sm text-slate-500 mt-0.5">Configure fields for admin and recruiter candidate forms.</p></div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600">{visibleDefaultCount} standard active</span>
+            <span className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600">{visibleCustomCount} additional active</span>
+            <button onClick={onClose} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-900"><X className="w-5 h-5" /></button>
+          </div>
+        </div>
+        <div className="grid lg:grid-cols-[320px_1fr] lg:h-[calc(92vh-82px)] h-auto min-h-0 lg:overflow-hidden">
+          <aside className="bg-white border-r border-slate-200 p-5 min-h-0 lg:overflow-y-auto">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Add Custom Field</p>
+            <div className="space-y-3">
+              <div><label className="block text-xs font-medium text-slate-500 mb-1">Field Label</label><input placeholder="Example: Portfolio Link" value={newField.label} onChange={(e) => setNewField(prev => ({ ...prev, label: e.target.value }))} className={inputCls(false)} /></div>
+              <div><label className="block text-xs font-medium text-slate-500 mb-1">Field Type</label><select value={newField.fieldType} onChange={(e) => setNewField(prev => ({ ...prev, fieldType: e.target.value }))} className={inputCls(false)}><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="boolean">Yes/No</option><option value="textarea">Textarea</option><option value="select">Select</option></select></div>
+              {newField.fieldType === 'select' && <div><label className="block text-xs font-medium text-slate-500 mb-1">Options</label><input placeholder="Option 1, Option 2" value={newField.options} onChange={(e) => setNewField(prev => ({ ...prev, options: e.target.value }))} className={inputCls(false)} /></div>}
+              <button onClick={addCustomField} className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 shadow-sm"><Plus className="w-4 h-4" />Add Field</button>
+            </div>
+            <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-900">Additional fields</p><p className="text-xs text-slate-500 mt-1">New fields appear in a separate section in the add candidate modal.</p></div>
+          </aside>
+          <div className="p-5 min-h-0 lg:overflow-y-auto overflow-visible">
+            <div className="grid md:grid-cols-2 gap-5 md:h-full md:min-h-0">
+              <section className="space-y-3 md:min-h-0 md:flex md:flex-col">
+                <div className="flex items-center justify-between"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Standard Fields</p><span className="text-xs text-slate-400">{config.fields.length} fields</span></div>
+                <div className="space-y-2 md:min-h-0 md:overflow-y-auto md:pr-1">
+                  {config.fields.map((field, i) => (
+                    <div key={field.fieldName} className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="flex items-center gap-3">
+                        <button type="button" disabled={field.isMandatory} onClick={() => toggleDefault(i)} className={`relative h-6 w-11 rounded-full transition-colors ${field.visible ? 'bg-blue-600' : 'bg-slate-200'} disabled:opacity-60`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${field.visible ? 'left-6' : 'left-1'}`} /></button>
+                        <div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-900 truncate">{field.label}</p><p className="text-xs text-slate-400 mt-0.5">{field.fieldName}</p></div>
+                        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-500">{field.fieldType}</span>
+                      </div>
+                      {field.isMandatory && <p className="text-xs text-red-500 mt-2">Required fields stay visible.</p>}
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <section className="space-y-3 md:min-h-0 md:flex md:flex-col">
+                <div className="flex items-center justify-between"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Additional Fields</p><span className="text-xs text-slate-400">{config.customFields.length} fields</span></div>
+                {config.customFields.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center"><p className="text-sm font-medium text-slate-800">No additional fields yet</p><p className="text-xs text-slate-500 mt-1">Create one from the panel on the left.</p></div> : (
+                  <div className="space-y-2 md:min-h-0 md:overflow-y-auto md:pr-1">
+                    {config.customFields.map((field, i) => (
+                      <div key={field.fieldName} className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="flex items-center gap-3">
+                          <button type="button" onClick={() => toggleCustom(i)} className={`relative h-6 w-11 rounded-full transition-colors ${field.visible ? 'bg-blue-600' : 'bg-slate-200'}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${field.visible ? 'left-6' : 'left-1'}`} /></button>
+                          <div className="min-w-0 flex-1">{editingIndex === i ? <input autoFocus value={field.label} onChange={(e) => editCustomLabel(i, e.target.value)} onBlur={() => setEditingIndex(null)} className={inputCls(false)} /> : <><p className="text-sm font-medium text-slate-900 truncate">{field.label}</p><p className="text-xs text-slate-400 mt-0.5">{field.fieldName}</p></>}</div>
+                          <span className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-500">{field.fieldType}</span>
+                        </div>
+                        <div className="flex justify-end gap-1 mt-3"><button onClick={() => setEditingIndex(i)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100"><Edit className="w-3.5 h-3.5" />Edit</button><button onClick={() => deleteCustom(i)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" />Delete</button></div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </ModalPortal>
+  );
+};
+
+// ── StatCard Component ────────────────────────────────────────────────────────
+const StatCard = ({ title, value, colorTheme, active, onClick, hasDot }) => {
   const themes = {
-    overall: 'from-blue-600 to-blue-700 text-white shadow-blue-200',
-    shared: 'from-indigo-50 to-indigo-100 text-indigo-700 border-indigo-200 shadow-indigo-100',
-    turnups: 'from-purple-50 to-purple-100 text-purple-700 border-purple-200 shadow-purple-100',
-    noshow: 'from-slate-100 to-slate-200 text-slate-700 border-slate-300 shadow-slate-100',
-    yetToAttend: 'from-violet-50 to-violet-100 text-violet-700 border-violet-200 shadow-violet-100',
-    selected: 'from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-emerald-100',
-    joined: 'from-teal-50 to-teal-100 text-teal-800 border-teal-200 shadow-teal-100',
-    rejected: 'from-red-50 to-red-100 text-red-700 border-red-200 shadow-red-100',
-    backout: 'from-rose-50 to-rose-100 text-rose-700 border-rose-200 shadow-rose-100',
-    hold: 'from-amber-50 to-amber-100 text-amber-700 border-amber-200 shadow-amber-100',
-    pipeline: 'from-orange-50 to-orange-100 text-orange-700 border-orange-200 shadow-orange-100',
-    today: 'from-cyan-50 to-cyan-100 text-cyan-700 border-cyan-200 shadow-cyan-100',
+    overall: 'bg-blue-600 text-white border-blue-700 dark:bg-blue-700',
+    shared: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/60 dark:text-blue-200',
+    turnups: 'bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/60 dark:text-purple-200',
+    noshow: 'bg-neutral-300 text-black border-neutral-400 dark:bg-neutral-700 dark:text-white',
+    yetToAttend: 'bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-200',
+    selected: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/60 dark:text-green-200',
+    joined: 'bg-emerald-200 text-emerald-900 border-emerald-300 dark:bg-emerald-900/60 dark:text-emerald-200',
+    rejected: 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/60 dark:text-red-200',
+    backout: 'bg-rose-100 text-rose-900 border-rose-200 dark:bg-rose-900/60 dark:text-rose-200',
+    hold: 'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/60 dark:text-orange-200',
+    pipeline: 'bg-amber-100 text-amber-900 border-amber-200 dark:bg-amber-900/60 dark:text-amber-200',
+    today: 'bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/60 dark:text-violet-200',
   };
   const themeClass = themes[colorTheme] || themes.overall;
+
   return (
-    <div
-      onClick={onClick}
-      className={`relative p-5 rounded-2xl border overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-md bg-gradient-to-br ${themeClass} ${onClick ? 'cursor-pointer' : ''} ${active ? 'ring-2 ring-offset-2 ring-blue-400 scale-[1.03] shadow-lg' : 'shadow-sm'}`}
-    >
-      <div className="flex justify-between items-start">
-        <div>
-          <h3 className="text-2xl font-black tracking-tight">{value}</h3>
-          <p className="text-xs mt-1 font-bold uppercase tracking-wider opacity-80">{title}</p>
-        </div>
-        {Icon && (
-          <div className={`p-2 rounded-xl ${colorTheme === 'overall' ? 'bg-white/20' : 'bg-white/50 shadow-sm'}`}>
-            <Icon className="h-5 w-5" />
-          </div>
-        )}
-      </div>
-      {/* Decorative background element */}
-      <div className="absolute -bottom-2 -right-2 opacity-10">
-        {Icon && <Icon className="h-12 w-12" />}
-      </div>
+    <div onClick={onClick} className={`relative p-4 rounded-xl shadow-sm border ${themeClass} ${onClick ? 'cursor-pointer' : ''} ${active ? 'ring-2 ring-offset-2 ring-slate-400 dark:ring-slate-500' : ''}`}>
+      {hasDot && <span className="absolute top-3 right-3 h-2 w-2 rounded-full bg-white opacity-80"></span>}
+      <h3 className="text-2xl font-bold">{value}</h3>
+      <p className="text-sm mt-1 font-medium opacity-90">{title}</p>
     </div>
   );
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+const getInitials = (name = '') => name.split(' ').map((n) => n[0]).join('').toUpperCase().substring(0, 2);
 const getCandidateId = (c) => c.candidateId || c._id?.substring(c._id.length - 6).toUpperCase();
-const getStatusBadgeColor = (s) => {
-  const low = (s || '').toLowerCase();
-  if (low.includes('joined') || low.includes('selected')) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-  if (low.includes('rejected') || low.includes('backout') || low.includes('no show')) return 'bg-rose-50 text-rose-700 border-rose-200';
-  if (low.includes('hold')) return 'bg-amber-50 text-amber-700 border-amber-200';
-  if (low.includes('pipeline')) return 'bg-orange-50 text-orange-700 border-orange-200';
-  if (low.includes('shared')) return 'bg-purple-50 text-purple-700 border-purple-200';
-  if (low.includes('attend') || low.includes('turnup')) return 'bg-indigo-50 text-indigo-700 border-indigo-200';
-  return 'bg-blue-50 text-blue-700 border-blue-200';
-};
+const formatDate = (dateString) => dateString ? new Date(dateString).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A';
+const formatSkills = (skills) => !skills ? 'N/A' : Array.isArray(skills) ? skills.slice(0, 3).join(', ') + (skills.length > 3 ? '...' : '') : skills.length > 50 ? skills.substring(0, 50) + '...' : skills;
+
+// ✅ Robust Date Extractor
 const getSafeDate = (d) => {
   if (!d) return '';
   if (typeof d === 'string' && d.length >= 10) return d.substring(0, 10);
-  try { return new Date(d).toISOString().split('T')[0]; } catch { return ''; }
+  try { return new Date(d).toISOString().split('T')[0]; } catch (e) { return ''; }
 };
 
-const ApplicationStatusBar = ({ currentStatus }) => {
-  const statusStr = (() => {
-    if (Array.isArray(currentStatus)) return currentStatus[currentStatus.length - 1] || 'Submitted';
-    return currentStatus || 'Submitted';
-  })();
-
-  const baseStages = ['Pipeline', 'Submitted', 'Shared Profiles', 'Yet to attend', 'Turnups'];
-  const terminalStatuses = ['Selected', 'Joined', 'Rejected', 'Hold', 'Backout', 'No Show'];
-
-  const isTerminal = terminalStatuses.includes(statusStr);
-  const steps = isTerminal ? [...baseStages, statusStr] : baseStages;
-  const currentIndex = steps.indexOf(statusStr);
-
-  const getStatusColor = (s) => {
-    if (['Joined', 'Selected'].includes(s)) return 'bg-emerald-600';
-    if (['Rejected', 'Backout', 'No Show'].includes(s)) return 'bg-red-600';
-    if (['Turnups'].includes(s)) return 'bg-purple-600';
-    if (['Shared Profiles'].includes(s)) return 'bg-blue-500';
-    if (['Pipeline'].includes(s)) return 'bg-amber-600';
-    if (['Hold'].includes(s)) return 'bg-orange-600';
-    return 'bg-blue-600'; // Default Submitted
-  };
-
-  return (
-    <div className="mt-8 mb-6 w-full max-w-4xl mx-auto">
-      <div className="text-[10px] font-bold text-slate-400 mb-8 uppercase tracking-[0.2em] text-center">Application Timeline</div>
-      <div className="relative flex justify-between items-start px-2">
-        {/* Connection Line Container */}
-        <div className="absolute top-[11px] left-0 w-full h-[2px] bg-slate-100 z-0" />
-
-        {/* Progress Fill Line */}
-        <div 
-          className="absolute top-[11px] left-0 h-[2px] bg-blue-600 transition-all duration-300 z-0"
-          style={{ width: `${currentIndex >= 0 ? (currentIndex / (steps.length - 1)) * 100 : 0}%` }}
-        />
-
-        {steps.map((step, idx) => {
-          const isActive = idx === currentIndex;
-          const isCompleted = idx <= currentIndex;
-          const statusColor = getStatusColor(step);
-
-          let circleBg = 'bg-white border-slate-200';
-          if (isCompleted && !isActive) {
-            circleBg = `${statusColor} border-transparent scale-110`;
-          } else if (isActive) {
-            circleBg = 'bg-white border-slate-400';
-          }
-
-          return (
-            <div key={step} className="relative z-10 flex flex-col items-center flex-1 group/step">
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 shadow-sm transition-all duration-500 ${circleBg}`}>
-                {isCompleted && !isActive && (
-                  <Check className="h-3.5 w-3.5 text-white" />
-                )}
-                {isActive && (
-                  <div className={`w-2.5 h-2.5 rounded-full ${statusColor} animate-pulse`} />
-                )}
-              </div>
-
-              <div className={`mt-3 text-center px-1 transition-all duration-500 ${isCompleted ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
-                }`} style={{ fontSize: '9px', lineHeight: '1.2' }}>
-                <div className="max-w-[80px] break-words whitespace-normal mx-auto uppercase tracking-tighter">
-                  {step}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
-const SubmissionPipeline = ({ status, onStepClick }) => {
-  const baseStages = ['Pipeline', 'Submitted', 'Shared Profiles', 'Yet to attend', 'Turnups'];
-  const terminalStages = ['Selected', 'Joined', 'Rejected', 'Hold', 'Backout', 'No Show'];
-  
-  const isTerminal = terminalStages.includes(status);
-  const steps = isTerminal ? [...baseStages, status] : baseStages;
-  const currentIndex = steps.indexOf(status);
-
-  const getStepColor = (step, idx) => {
-    if (idx < currentIndex) {
-      return 'bg-blue-600 text-white border-blue-600';
-    } else if (idx === currentIndex) {
-      if (['Selected', 'Joined'].includes(step)) return 'bg-emerald-600 text-white border-emerald-600 ring-4 ring-emerald-100';
-      if (['Rejected', 'Backout', 'No Show'].includes(step)) return 'bg-red-600 text-white border-red-600 ring-4 ring-red-100';
-      if (['Hold'].includes(step)) return 'bg-orange-500 text-white border-orange-500 ring-4 ring-orange-100';
-      return 'bg-blue-600 text-white border-blue-600 ring-4 ring-blue-100';
-    } else {
-      return 'bg-white text-slate-400 border-slate-200 hover:border-slate-400';
-    }
-  };
-
-  return (
-    <div className="w-full py-4 relative">
-      <div className="relative flex items-center justify-between">
-        {/* Background Line */}
-        <div className="absolute left-0 right-0 top-[14px] -translate-y-1/2 h-[2px] bg-slate-200 z-0" />
-        
-        {/* Progress Fill Line */}
-        <div 
-          className="absolute left-0 top-[14px] -translate-y-1/2 h-[2px] bg-blue-600 transition-all duration-300 z-0"
-          style={{ width: `${currentIndex >= 0 ? (currentIndex / (steps.length - 1)) * 100 : 0}%` }}
-        />
-
-        {steps.map((step, idx) => {
-          const isActive = idx === currentIndex;
-          const isCompleted = idx <= currentIndex;
-          const stepStyles = getStepColor(step, idx);
-
-          return (
-            <div key={step} className="flex flex-col items-center flex-1 relative z-10">
-              <button
-                type="button"
-                onClick={() => onStepClick(step)}
-                className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-semibold transition-all duration-200 bg-white ${stepStyles}`}
-                title={`Change status to ${step}`}
-              >
-                {isCompleted && !isActive ? (
-                  <Check className="h-3.5 w-3.5 text-white" />
-                ) : (
-                  idx + 1
-                )}
-              </button>
-              <span className={`mt-2 text-[9px] font-semibold text-center max-w-[85px] leading-tight transition-colors duration-200 select-none uppercase tracking-tighter ${
-                isActive ? 'text-slate-900 font-bold' : isCompleted ? 'text-slate-700 font-medium' : 'text-slate-400'
-              }`}>
-                {step}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
-const getStatusDotColor = (s) => {
-  if (['Joined', 'Selected'].includes(s)) return 'bg-emerald-500';
-  if (['Rejected', 'Backout', 'No Show'].includes(s)) return 'bg-red-500';
-  if (['Turnups'].includes(s)) return 'bg-purple-500';
-  if (['Shared Profiles'].includes(s)) return 'bg-blue-500';
-  if (['Pipeline'].includes(s)) return 'bg-amber-500';
-  if (['Hold'].includes(s)) return 'bg-orange-500';
-  return 'bg-slate-400';
-};
-
+// ✅ Returns firstName only for recruiter column display
 const getRecruiterName = (r) => {
   if (!r) return 'Unassigned';
-  if (r.firstName && r.lastName) return r.firstName + " " + r.lastName;
+  if (r.firstName) return r.firstName;
   if (r.username) return r.username;
   if (r.name) return r.name.split(' ')[0];
   return r.email || 'Unknown';
 };
+
+const getCandidateRecruiterDetails = (candidate, recruiters = []) => {
+  const recruiter = candidate?.recruiterId;
+  if (recruiter && typeof recruiter === 'object') return recruiter;
+  const recruiterId = recruiter ? String(recruiter) : '';
+  const found = recruiterId
+    ? recruiters.find(r => String(r._id || r.id || '') === recruiterId)
+    : null;
+  return found || { name: candidate?.recruiterName || 'Unassigned' };
+};
+
+// ✅ Returns a display label with role indicator for dropdowns
 const getRecruiterLabel = (r) => {
   const name = getRecruiterName(r);
   const roleTag = r.role === 'admin' ? ' (Admin)' : r.role === 'manager' ? ' (Manager)' : '';
   return `${name}${roleTag}`;
 };
 
-const STATUS_FLOW_ORDER = [
-  'Pipeline', 'Submitted', 'Shared Profiles', 'Yet to attend', 'Turnups',
-  'Selected', 'Hold', 'Rejected', 'No Show', 'Backout', 'Joined'
+const SkillsBadgeInput = ({ value, onChange, error }) => {
+  const [draft, setDraft] = useState('');
+  const skills = normalizeSkills(value);
+
+  const addFromText = (text) => {
+    const nextSkills = normalizeSkills([...skills, ...normalizeSkills(text)]);
+    onChange(nextSkills);
+    setDraft('');
+  };
+
+  const removeSkill = (skillToRemove) => {
+    onChange(skills.filter((skill) => skill !== skillToRemove));
+  };
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'Enter' || event.key === ',') {
+      event.preventDefault();
+      if (draft.trim()) addFromText(draft);
+    } else if (event.key === 'Backspace' && !draft && skills.length > 0) {
+      removeSkill(skills[skills.length - 1]);
+    }
+  };
+
+  return (
+    <div className={`min-h-[42px] w-full rounded-lg border bg-white px-2 py-2 text-sm transition-colors focus-within:ring-2 focus-within:ring-blue-500 ${error ? 'border-red-500' : 'border-slate-200 dark:border-slate-700'}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        {skills.map((skill) => (
+          <span key={skill} className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 px-2 py-1 text-xs font-medium text-blue-700">
+            {skill}
+            <button
+              type="button"
+              onClick={() => removeSkill(skill)}
+              className="rounded-full p-0.5 text-blue-500 hover:bg-blue-100 hover:text-blue-700"
+              aria-label={`Remove ${skill}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+        <input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={() => { if (draft.trim()) addFromText(draft); }}
+          placeholder={skills.length ? 'Add skill' : 'Type skill and press Enter'}
+          className="min-w-[160px] flex-1 border-0 bg-transparent px-1 py-1 text-sm outline-none placeholder:text-slate-400"
+        />
+      </div>
+    </div>
+  );
+};
+
+const ALL_STATUSES = [
+  'Submitted', 'Shared Profiles', 'Yet to attend', 'Turnups',
+  'No Show', 'Selected', 'Joined', 'Rejected', 'Hold', 'Backout', 'Pipeline'
 ];
 
-const ALL_STATUSES = [...STATUS_FLOW_ORDER];
 const SOURCES = ['LinkedIn', 'Naukri', 'Indeed', 'Portal', 'Referral', 'Other'];
-const formatDate = (dateString) => dateString ? new Date(dateString).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A';
 
-// ── CustomFieldInput — renders the right input for a custom field type ────────
-const CustomFieldInput = ({ cf, value, onChange }) => {
-  if (cf.fieldType === 'boolean') {
-    return (
-      <select value={value || 'false'} onChange={(e) => onChange(cf.fieldName, e.target.value)} className={inputCls(false)}>
-        <option value="false">No</option>
-        <option value="true">Yes</option>
-      </select>
-    );
+const STATUS_BADGE_CLASSES = {
+  Pipeline: 'bg-gray-100 text-gray-700 border-gray-200',
+  Submitted: 'bg-blue-100 text-blue-700 border-blue-200',
+  'Shared Profiles': 'bg-indigo-100 text-indigo-700 border-indigo-200',
+  'Yet to attend': 'bg-amber-100 text-amber-800 border-amber-200',
+  Turnups: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  Selected: 'bg-green-100 text-green-700 border-green-200',
+  Rejected: 'bg-red-100 text-red-700 border-red-200',
+  Hold: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  Joined: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  Backout: 'bg-rose-100 text-rose-700 border-rose-200',
+  'No Show': 'bg-slate-100 text-slate-700 border-slate-200',
+};
+
+const getStatusBadgeClass = (status) =>
+  STATUS_BADGE_CLASSES[status] || 'bg-slate-100 text-slate-700 border-slate-200';
+
+const StatusBadge = ({ status }) => (
+  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-none whitespace-nowrap ${getStatusBadgeClass(status)}`}>
+    {status || 'Pipeline'}
+  </span>
+);
+
+const getSubmissionDateValue = (submission) =>
+  submission?.submittedAt || submission?.createdAt || submission?.updatedAt || '';
+
+const formatSubmissionDate = (submission) => {
+  const value = getSubmissionDateValue(submission);
+  return value ? new Date(value).toLocaleDateString('en-GB') : 'N/A';
+};
+
+const getSubmissionStatus = (submission) =>
+  submission?.pipelineStage || submission?.status || 'Pipeline';
+
+const getSubmittedByLabel = (submission) => {
+  if (submission?.submittedByName) return submission.submittedByName;
+  const submittedBy = submission?.submittedBy;
+  if (!submittedBy || typeof submittedBy !== 'object') return 'N/A';
+  const fullName = `${submittedBy.firstName || ''} ${submittedBy.lastName || ''}`.trim();
+  return fullName || submittedBy.name || submittedBy.email || 'N/A';
+};
+
+const getCandidateSubmissions = (candidate) => {
+  if (!Array.isArray(candidate?.submissions)) return [];
+  return [...candidate.submissions].sort((a, b) => {
+    const aTime = new Date(getSubmissionDateValue(a) || 0).getTime();
+    const bTime = new Date(getSubmissionDateValue(b) || 0).getTime();
+    return bTime - aTime;
+  });
+};
+
+const getCandidateStatuses = (candidate) => {
+  const submissions = getCandidateSubmissions(candidate);
+  if (submissions.length > 0) {
+    // Show one status per client submission, sorted newest first
+    const sorted = [...submissions].sort((a, b) => {
+      const aTime = new Date(a.updatedAt || getSubmissionDateValue(a) || 0).getTime();
+      const bTime = new Date(b.updatedAt || getSubmissionDateValue(b) || 0).getTime();
+      return bTime - aTime;
+    });
+    return sorted.map((s) => getSubmissionStatus(s));
   }
+
+  // No client submissions — show only the single latest status
+  if (Array.isArray(candidate?.status)) {
+    const filtered = candidate.status.filter(Boolean);
+    return filtered.length > 0 ? [filtered[filtered.length - 1]] : ['Submitted'];
+  }
+  return [candidate?.status || 'Submitted'];
+};
+
+const getSubmissionJobDetails = (submission, jobs = []) => {
+  const jobRef = submission?.jobId;
+  const populatedJob = jobRef && typeof jobRef === 'object' ? jobRef : null;
+  const jobId = populatedJob?._id || populatedJob?.id || jobRef;
+  const job = jobs.find((item) => {
+    const itemId = item?._id || item?.id;
+    return (
+      (jobId && itemId && String(itemId) === String(jobId)) ||
+      (submission?.jobCode && item?.jobCode === submission.jobCode)
+    );
+  });
+
+  return {
+    ...(populatedJob || {}),
+    ...(job || {}),
+    jobCode: submission?.jobCode || job?.jobCode || populatedJob?.jobCode,
+    clientName: submission?.clientName || job?.clientName || populatedJob?.clientName,
+    position: submission?.position || job?.position || populatedJob?.position,
+  };
+};
+
+const candidateMatchesClient = (candidate, clientFilter) => {
+  if (clientFilter === 'all') return true;
+  const submissions = getCandidateSubmissions(candidate);
+  if (submissions.length > 0) {
+    return submissions.some((submission) => submission.clientName === clientFilter);
+  }
+  return candidate?.client === clientFilter;
+};
+
+const CandidateClientCell = ({ candidate, onShowMore }) => {
+  const submissions = getCandidateSubmissions(candidate);
+  if (submissions.length === 0) {
+    return <span className="text-slate-600 font-medium">{candidate.client || 'N/A'}</span>;
+  }
+
+  const [latest, ...more] = submissions;
   return (
-    <input
-      type={cf.fieldType === 'date' ? 'date' : cf.fieldType === 'number' ? 'number' : 'text'}
-      value={value || ''}
-      onChange={(e) => onChange(cf.fieldName, e.target.value)}
-      className={inputCls(false)}
-      placeholder={`Enter ${cf.fieldName}…`}
-    />
+    <div className="flex items-center gap-2 whitespace-nowrap">
+      <span className="font-semibold text-slate-800">{latest.clientName || candidate.client || 'N/A'}</span>
+      {more.length > 0 && (
+        <button
+          type="button"
+          onClick={() => onShowMore(candidate)}
+          className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+        >
+          +{more.length} more
+        </button>
+      )}
+    </div>
   );
 };
 
 // ── Main Component ────────────────────────────────────────────────────────────
+const ClientSubmissionsModal = ({ candidate, jobs = [], onClose }) => {
+  const submissions = getCandidateSubmissions(candidate);
+  const [selectedJob, setSelectedJob] = useState(null);
+
+  return (
+    <ModalPortal>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl border border-slate-200">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 p-5">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">Submitted Clients & Jobs</h3>
+            <p className="mt-1 text-sm text-slate-500">{candidate?.name || 'Candidate'}</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-white hover:text-slate-700">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="max-h-[60vh] overflow-auto p-5">
+          <div className="overflow-auto rounded-lg border border-slate-200">
+            <table className="w-full text-left text-sm min-w-[650px]">
+              <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Client Name</th>
+                  <th className="px-4 py-3">Job Code</th>
+                  <th className="px-4 py-3">Job Position</th>
+                  <th className="px-4 py-3">Pipeline/Status</th>
+                  <th className="px-4 py-3">Submitted Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {submissions.map((submission) => (
+                  <tr key={submission._id || `${submission.jobId}-${submission.jobCode}`} className="align-top">
+                    <td className="px-4 py-3 font-semibold text-slate-800">{submission.clientName || 'N/A'}</td>
+                    <td className="px-4 py-3">
+                      {submission.jobCode ? (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedJob(getSubmissionJobDetails(submission, jobs))}
+                          className="font-mono text-xs font-bold text-blue-700 underline decoration-blue-300 underline-offset-4 hover:text-blue-900"
+                          title="Open job details"
+                        >
+                          {submission.jobCode}
+                        </button>
+                      ) : (
+                        <span className="font-mono text-xs text-slate-500">N/A</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">{submission.position || 'N/A'}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col gap-1">
+                        <StatusBadge status={getSubmissionStatus(submission)} />
+                        {submission.updatedAt && (
+                          <span className="text-[10px] text-slate-400 font-medium mt-0.5">
+                            Changed: {new Date(submission.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{formatSubmissionDate(submission)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <JobDetailsModal job={selectedJob} onClose={() => setSelectedJob(null)} />
+    </div>
+    </ModalPortal>
+  );
+};
+
 export default function AdminCandidates() {
   const { toast } = useToast();
-  const currentUser = getCurrentUser();
-  const isManagerOrAdmin = currentUser?.role === 'manager' || currentUser?.role === 'admin';
 
-  // ── Data State ────────────────────────────────────────────────────────────
   const [candidates, setCandidates] = useState([]);
   const [recruiters, setRecruiters] = useState([]);
   const [clients, setClients] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
   const [isParsingResume, setIsParsingResume] = useState(false);
   const [resumeSuccess, setResumeSuccess] = useState({ show: false, fileName: '', fieldsCount: 0 });
-  const [viewingCandidate, setViewingCandidate] = useState(null);
-  const [selectedDeliverClientId, setSelectedDeliverClientId] = useState('');
+  const [matchingJobsCandidate, setMatchingJobsCandidate] = useState(null);
+  const [matchingJobs, setMatchingJobs] = useState([]);
+  const [loadingMatchingJobs, setLoadingMatchingJobs] = useState(false);
+  const [matchingJobsError, setMatchingJobsError] = useState(null);
+  const [viewingJobDetails, setViewingJobDetails] = useState(null);
+  const [expandedJobId, setExpandedJobId] = useState(null);
 
-  const filteredJobs = useMemo(() => {
-    if (!selectedDeliverClientId) return [];
-    const client = clients.find(c => c._id === selectedDeliverClientId);
-    if (!client) return [];
-    return jobs.filter(j => j.clientName === client.companyName);
-  }, [selectedDeliverClientId, clients, jobs]);
-
-  // ── Filter / Sort / Pagination State ─────────────────────────────────────
-  const [searchTerm, setSearchTerm] = useState('');
-  const [roleSearchTerm, setRoleSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [searchKeywords, setSearchKeywords] = useState([]);
   const [statusFilter, setStatusFilter] = useState('all');
   const [recruiterFilter, setRecruiterFilter] = useState('all');
   const [clientFilter, setClientFilter] = useState('all');
   const [activeStatFilter, setActiveStatFilter] = useState(null);
-  const [sortConfig, setSortConfig] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'candidateId', direction: 'desc' });
   const [selectedIds, setSelectedIds] = useState([]);
+  const [isJobInviteOpen, setIsJobInviteOpen] = useState(false);
+
+  // --- Pagination States ---
   const [currentPage, setCurrentPage] = useState(1);
-  const [viewCandidate, setViewCandidate] = useState(null);
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [candidateScoreData, setCandidateScoreData] = useState(null);
-  const [isScoringCandidate, setIsScoringCandidate] = useState(false);
-  const [scoreExpanded, setScoreExpanded] = useState(false);
-  const ITEMS_PER_PAGE = 10;
+  const ITEMS_PER_PAGE = 100;
 
-  // ── Tenant Settings (live, so changes reflect immediately) ────────────────
-  const [tenantSettings, setTenantSettings] = useState(getTenantSettings);
-  const hiddenFields = tenantSettings.hiddenFields || [];
-  const tenantCustomFields = tenantSettings.customFields || [];
-  const isHidden = (fieldName) => hiddenFields.includes(fieldName);
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchKeywords, statusFilter, recruiterFilter, clientFilter, activeStatFilter]);
 
-  // ── Settings Modal State ──────────────────────────────────────────────────
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [tempHiddenFields, setTempHiddenFields] = useState([]);
-  const [tempCustomFields, setTempCustomFields] = useState([]);
-  const [newFieldName, setNewFieldName] = useState('');
-  const [newFieldType, setNewFieldType] = useState('text');
-  const [editingFieldIndex, setEditingFieldIndex] = useState(null);
-  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  // Bulk Assign States
+  const [bulkRecruiterId, setBulkRecruiterId] = useState('');
+  const [isBulkAssigning, setIsBulkAssigning] = useState(false);
 
-  // ── Dialog State ──────────────────────────────────────────────────────────
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
+  const [viewCandidate, setViewCandidate] = useState(null);
+  const [clientPopoverCandidate, setClientPopoverCandidate] = useState(null);
   const [errors, setErrors] = useState({});
+  const [candidateFieldConfig, setCandidateFieldConfig] = useState(getCandidateFieldConfig);
+  const [candidateFormControlOpen, setCandidateFormControlOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+
+  // Today Submissions modal (Admin)
   const [isTodaySubOpen, setIsTodaySubOpen] = useState(false);
   const [isCheckingEmail, setIsCheckingEmail] = useState(false);
   const [isCheckingPhone, setIsCheckingPhone] = useState(false);
-  const [bulkRecruiterId, setBulkRecruiterId] = useState('');
-  const [isBulkAssigning, setIsBulkAssigning] = useState(false);
-  const [expandedRowId, setExpandedRowId] = useState(null);
-  const [activeClientPopoverId, setActiveClientPopoverId] = useState(null);
-  const [activeStatusPopoverId, setActiveStatusPopoverId] = useState(null);
 
-  // ── Bulk Import State ────────────────────────────────────────────────────
-  const importFileInputRef = useRef(null);
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [importParsedData, setImportParsedData] = useState(null);
-  const [importParseProgress, setImportParseProgress] = useState(0);
-  const [isParsing, setIsParsing] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
-  const [importResult, setImportResult] = useState(null);
-  const [importDragOver, setImportDragOver] = useState(false);
-  const [importFileName, setImportFileName] = useState('');
+  // Refs for Top and Bottom Scrollbars
+  const topScrollRef = useRef(null);
+  const bottomScrollRef = useRef(null);
 
+  const handleTopScroll = () => {
+    if (bottomScrollRef.current && topScrollRef.current) {
+      bottomScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    }
+  };
+
+  const handleBottomScroll = () => {
+    if (topScrollRef.current && bottomScrollRef.current) {
+      topScrollRef.current.scrollLeft = bottomScrollRef.current.scrollLeft;
+    }
+  };
+
+  // Today in YYYY-MM-DD
   const todayStr = new Date().toISOString().split('T')[0];
+
   const initialFormData = {
     firstName: '', lastName: '', contact: '', alternateNumber: '', email: '',
-    dateOfBirth: '', dateAdded: todayStr, gender: '', linkedin: '',
-    currentLocation: '', preferredLocation: '', position: '', positionOther: '', client: '', clientCandidateId: '',
-    currentCompany: '', industry: '', totalExperienceYears: '0', totalExperienceMonths: '0',
-    relevantExperienceYears: '0', relevantExperienceMonths: '0',
+    dateOfBirth: '', dateAdded: todayStr,
+    currentLocation: '', preferredLocation: '', position: '', positionOther: '', client: '', currentCompany: '',
     totalExperience: '', relevantExperience: '', education: '',
     ctc: '', currentTakeHome: '', ectc: '', expectedTakeHome: '',
     noticePeriod: '', servingNoticePeriod: 'false', lwd: '',
     reasonForChange: '', offersInHand: 'false', offerPackage: '', source: 'Portal',
-    recruiterId: '', status: ['Submitted'],
-    skills: '', remarks: '',
-    customFields: {},
+    recruiterId: '', status: ['Submitted'], // 🔴 Multi-Select Array
+    skills: [], remarks: '', customFields: {},
+    submissions: [],  // ← multi client/job submission rows
   };
   const [formData, setFormData] = useState(initialFormData);
 
-  useEffect(() => { setCurrentPage(1); }, [searchTerm, roleSearchTerm, statusFilter, recruiterFilter, clientFilter, activeStatFilter]);
+  const handleCandidateConfigChange = (updated) => {
+    const normalized = normalizeCandidateFieldConfig(updated);
+    setCandidateFieldConfig(normalized);
+    saveCandidateFieldConfig(normalized);
+  };
 
-  // ── Data Fetching ─────────────────────────────────────────────────────────
+  const isCandidateFieldVisible = (fieldName) => {
+    const field = candidateFieldConfig.fields.find(item => item.fieldName === fieldName);
+    return field?.visible !== false;
+  };
+
+  const visibleCustomCandidateFields = useMemo(
+    () => candidateFieldConfig.customFields.filter(field => field.visible),
+    [candidateFieldConfig]
+  );
+
+  const handleCustomCandidateFieldChange = (fieldName, value) => {
+    setFormData(prev => ({ ...prev, customFields: { ...prev.customFields, [fieldName]: value } }));
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
       const headers = getAuthHeader();
       const [resCand, resRec, resCli, resJobs] = await Promise.all([
-        fetch(`${API_URL}/candidates`, { headers }),
-        fetch(`${API_URL}/recruiters`, { headers }),
-        fetch(`${API_URL}/clients`, { headers }),
-        fetch(`${API_URL}/jobs`, { headers }),
+        fetch(`${API_URL}/candidates?includeSubmissions=true`, { headers }),
+        fetch(`${API_URL}/recruiters?view=lookup`, { headers }),
+        fetch(`${API_URL}/clients?view=lookup`, { headers }),
+        fetch(`${API_URL}/jobs?view=lookup`, { headers }),
       ]);
-      if (resCand.ok) setCandidates(await resCand.json());
+
+      if (resCand.ok) {
+        const data = await resCand.json();
+        setCandidates(data);
+      }
       if (resRec.ok) {
         const data = await resRec.json();
-        setRecruiters(data.sort((a, b) => {
+        // Sort: admins first, then managers, then recruiters
+        const sorted = data.sort((a, b) => {
           const order = { admin: 0, manager: 1, recruiter: 2 };
           return (order[a.role] ?? 3) - (order[b.role] ?? 3);
-        }));
+        });
+        setRecruiters(sorted);
       }
-      if (resCli.ok) setClients(await resCli.json());
+      if (resCli.ok) {
+        const data = await resCli.json();
+        setClients(data);
+      }
       if (resJobs.ok) {
         const data = await resJobs.json();
         setJobs(Array.isArray(data) ? data : data.jobs || []);
       }
-    } catch {
+    } catch (e) {
       toast({ title: 'Error', description: 'Network error.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
   };
+
   useEffect(() => { fetchData(); }, []);
 
-  useEffect(() => {
-    const handleOutsideClick = () => {
-      setActiveClientPopoverId(null);
-      setActiveStatusPopoverId(null);
-    };
-    document.addEventListener('click', handleOutsideClick);
-    return () => document.removeEventListener('click', handleOutsideClick);
-  }, []);
-
-  // ── Form Handlers ─────────────────────────────────────────────────────────
-  const handleInputChange = (field, value) => {
-    let newValue = value;
-    if (field === 'contact' || field === 'alternateNumber') {
-      newValue = value.replace(/\D/g, '').slice(0, 10);
-    } else if (field === 'firstName' || field === 'lastName') {
-      newValue = value.replace(/[0-9]/g, '');
-    } else if (field === 'ctc' || field === 'ectc') {
-      newValue = value.replace(/[^0-9.]/g, '');
-      const parts = newValue.split('.');
-      if (parts.length > 2) newValue = parts[0] + '.' + parts.slice(1).join('');
-      if (newValue !== '' && !isNaN(newValue) && parseFloat(newValue) > 50) newValue = '50';
+  const fetchMatchingJobs = async (candidate) => {
+    setLoadingMatchingJobs(true);
+    setMatchingJobsError(null);
+    setMatchingJobs([]);
+    try {
+      const headers = getAuthHeader();
+      const res = await fetch(`${API_URL}/candidates/${candidate._id}/matching-jobs`, {
+        headers,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Failed to fetch matching jobs');
+      }
+      setMatchingJobs(data.jobs || []);
+    } catch (err) {
+      console.error(err);
+      setMatchingJobsError('Detailed analysis is temporarily unavailable. Showing rule-based scores.');
+    } finally {
+      setLoadingMatchingJobs(false);
     }
+  };
 
-    // For years/months, we update the composite fields too
-    setFormData((prev) => {
-      const next = { ...prev, [field]: newValue };
-      if (field.startsWith('totalExperience')) {
-        next.totalExperience = `${next.totalExperienceYears} yrs ${next.totalExperienceMonths} months`;
-      }
-      if (field.startsWith('relevantExperience')) {
-        next.relevantExperience = `${next.relevantExperienceYears} yrs ${next.relevantExperienceMonths} months`;
-      }
-      return next;
-    });
+  useEffect(() => {
+    if (matchingJobsCandidate) {
+      fetchMatchingJobs(matchingJobsCandidate);
+    }
+  }, [matchingJobsCandidate]);
 
+  const openMatchingJobsModal = (candidate) => {
+    setMatchingJobsCandidate(candidate);
+  };
+
+  const handleInputChange = (field, value) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) setErrors((prev) => { const n = { ...prev }; delete n[field]; return n; });
   };
 
-  const handleCustomFieldChange = (fieldName, value) => {
-    setFormData((prev) => ({
-      ...prev,
-      customFields: { ...prev.customFields, [fieldName]: value },
-    }));
-  };
-
+  // ✅ Status Multi-Select Handlers
   const addStatus = (newStatus) => {
     if (!newStatus) return;
     if (newStatus === 'SELECT_ALL') {
-      setFormData((prev) => ({ ...prev, status: [...ALL_STATUSES] }));
+      setFormData(prev => ({ ...prev, status: [...ALL_STATUSES] }));
     } else if (!formData.status.includes(newStatus)) {
-      setFormData((prev) => ({ ...prev, status: [...prev.status, newStatus] }));
+      setFormData(prev => ({ ...prev, status: [...prev.status, newStatus] }));
     }
-    if (errors.status) setErrors((prev) => { const n = { ...prev }; delete n.status; return n; });
+    if (errors.status) setErrors(prev => { const n = { ...prev }; delete n.status; return n; });
   };
-  const removeStatus = (s) => setFormData((prev) => ({ ...prev, status: prev.status.filter(x => x !== s) }));
 
-  // ── Duplicate Checks ──────────────────────────────────────────────────────
+  const removeStatus = (statusToRemove) => {
+    setFormData(prev => ({ ...prev, status: prev.status.filter(s => s !== statusToRemove) }));
+  };
+
+  // ── Email duplicate check (called onBlur) ──────────────────────────────────
   const checkEmailDuplicate = async (email) => {
     if (!email || !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email.trim())) return;
     setIsCheckingEmail(true);
     try {
+      const headers = getAuthHeader();
       const excludeParam = isEditMode && selectedCandidateId ? `&excludeId=${selectedCandidateId}` : '';
-      const res = await fetch(`${API_URL}/candidates/check-email?email=${encodeURIComponent(email.trim())}${excludeParam}`, { headers: getAuthHeader() });
+      const res = await fetch(`${API_URL}/candidates/check-email?email=${encodeURIComponent(email.trim())}${excludeParam}`, { headers });
+      if (!res.ok) return;
       const data = await res.json();
-      if (data.exists) setErrors((prev) => ({ ...prev, email: `Already exists (ID: ${data.candidateId}${data.name ? ' — ' + data.name : ''})` }));
-    } catch { /* ignore */ } finally { setIsCheckingEmail(false); }
+      if (data.exists) {
+        setErrors(prev => ({
+          ...prev,
+          email: `A candidate with this email already exists (ID: ${data.candidateId}${data.name ? ' — ' + data.name : ''})`,
+        }));
+      }
+    } catch (_) {
+    } finally {
+      setIsCheckingEmail(false);
+    }
   };
 
+  // ── Phone duplicate check (called onBlur on contact field) ─────────────────
   const checkPhoneDuplicate = async (phone) => {
     const digits = phone ? phone.replace(/\D/g, '').slice(-10) : '';
     if (!digits || digits.length !== 10) return;
     setIsCheckingPhone(true);
     try {
+      const headers = getAuthHeader();
       const excludeParam = isEditMode && selectedCandidateId ? `&excludeId=${selectedCandidateId}` : '';
-      const res = await fetch(`${API_URL}/candidates/check-phone?phone=${encodeURIComponent(digits)}${excludeParam}`, { headers: getAuthHeader() });
+      const res = await fetch(`${API_URL}/candidates/check-phone?phone=${encodeURIComponent(digits)}${excludeParam}`, { headers });
+      if (!res.ok) return;
       const data = await res.json();
-      if (data.exists) setErrors((prev) => ({ ...prev, contact: `Already exists (ID: ${data.candidateId}${data.name ? ' — ' + data.name : ''})` }));
-    } catch { /* ignore */ } finally { setIsCheckingPhone(false); }
+      if (data.exists) {
+        setErrors(prev => ({
+          ...prev,
+          contact: `A candidate with this phone already exists (ID: ${data.candidateId}${data.name ? ' — ' + data.name : ''})`,
+        }));
+      }
+    } catch (_) {
+    } finally {
+      setIsCheckingPhone(false);
+    }
   };
 
-  // ── Resume Upload ─────────────────────────────────────────────────────────
   const handleResumeUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     if (file.size > 5 * 1024 * 1024) {
       toast({ title: 'Error', description: 'File size must be less than 5MB', variant: 'destructive' });
       return;
     }
+
     const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-    const validExt = ['.pdf', '.doc', '.docx'];
+    const validExtensions = ['.pdf', '.doc', '.docx'];
     const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-    if (!validTypes.includes(file.type) && !validExt.includes(fileExt)) {
-      toast({ title: 'Error', description: 'Only PDF, DOC, DOCX supported.', variant: 'destructive' });
+
+    if (!validTypes.includes(file.type) && !validExtensions.includes(fileExt)) {
+      toast({ title: 'Error', description: 'Invalid file type. Only PDF, DOC, and DOCX are supported.', variant: 'destructive' });
       return;
     }
+
     setIsParsingResume(true);
+
     try {
-      const fd = new FormData();
-      fd.append('resume', file);
+      const uploadFormData = new FormData();
+      uploadFormData.append('resume', file);
+
       const headers = getAuthHeader();
       delete headers['Content-Type'];
-      const res = await fetch(`${API_URL}/candidates/parse-resume`, { method: 'POST', headers, body: fd });
-      const result = await res.json();
-      if (!res.ok || !result.success) throw new Error(result.message || 'Failed to parse resume');
 
-      const { data } = result;
-      let fName = '', lName = '';
-      if (data.name) {
-        const parts = data.name.trim().split(' ');
-        fName = parts[0] || '';
-        lName = parts.slice(1).join(' ') || '';
+      const res = await fetch(`${API_URL}/candidates/parse-resume`, {
+        method: 'POST',
+        headers,
+        body: uploadFormData,
+      });
+
+      const result = await res.json();
+
+      if (!res.ok || !result.success) {
+        throw new Error(result.message || 'Failed to parse resume');
       }
 
-      let filledCount = 0;
-      const updates = {};
-      if (fName) { updates.firstName = fName; filledCount++; }
-      if (lName) { updates.lastName = lName; filledCount++; }
-      if (data.email) { updates.email = data.email; filledCount++; }
-      if (data.contact) { updates.contact = data.contact; filledCount++; }
-      if (data.skills) { updates.skills = data.skills; filledCount++; }
-      if (data.totalExperience) { updates.totalExperience = data.totalExperience; filledCount++; }
-      if (data.position) { updates.position = data.position; filledCount++; }
+      const { data } = result;
 
-      setFormData((prev) => ({ ...prev, ...updates, resume: file }));
-      setResumeSuccess({ show: true, fileName: file.name, fieldsCount: filledCount });
-      setTimeout(() => setResumeSuccess((s) => ({ ...s, show: false })), 5000);
-    } catch (err) {
-      toast({ title: 'Parse failed', description: err.message || 'Could not parse resume', variant: 'destructive' });
+      let fName = '', lName = '';
+      if (data.name) {
+        const nameParts = data.name.trim().split(' ');
+        fName = nameParts[0] || '';
+        lName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+      }
+
+      setFormData(prev => ({
+        ...prev,
+        firstName: prev.firstName || fName,
+        lastName: prev.lastName || lName,
+        email: prev.email || data.email || '',
+        contact: prev.contact || data.contact || '',
+        skills: normalizeSkills(prev.skills).length ? prev.skills : normalizeSkills(data.skills),
+        totalExperience: prev.totalExperience || data.totalExperience || '',
+        education: prev.education || data.education || '',
+        currentCompany: prev.currentCompany || data.currentCompany || '',
+        currentLocation: prev.currentLocation || data.currentLocation || '',
+      }));
+
+      setResumeSuccess({
+        show: true,
+        fileName: file.name,
+        fieldsCount: Object.values({
+          name: data.name, email: data.email, contact: data.contact,
+          skills: data.skills, experience: data.totalExperience,
+          education: data.education,
+          company: data.currentCompany, location: data.currentLocation,
+        }).filter(Boolean).length,
+      });
+      setTimeout(() => setResumeSuccess(s => ({ ...s, show: false })), 5000);
+    } catch (error) {
+      console.error('Parsing error:', error);
+      toast({ title: 'Warning', description: 'Could not parse resume automatically. Please fill in details manually.', variant: 'default' });
     } finally {
       setIsParsingResume(false);
+      e.target.value = '';
     }
   };
 
-  // ── Validation ────────────────────────────────────────────────────────────
   const validateForm = () => {
-    const d = formData;
     const e = {};
-    if (!d.firstName?.trim()) e.firstName = 'First name is required';
-    if (!d.lastName?.trim()) e.lastName = 'Last name is required';
-    if (!d.contact?.trim()) e.contact = 'Contact number is required';
-    else if (!/^\d{10}$/.test(d.contact.replace(/\D/g, '').slice(-10))) e.contact = 'Enter a valid 10-digit phone number';
-    if (!d.email?.trim()) e.email = 'Email is required';
-    else if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(d.email.trim())) e.email = 'Enter a valid email address';
-    if (!d.position?.trim()) e.position = 'Position is required';
-    // client is no longer required as a flat field
-    if (!d.skills?.trim()) e.skills = 'At least one skill is required';
-    if (!d.status || d.status.length === 0) e.status = 'At least one status is required';
-    if (!d.dateAdded) { e.dateAdded = 'Date Added is required'; }
-    else if (d.dateAdded > new Date().toLocaleDateString('en-CA')) e.dateAdded = 'Cannot be a future date';
-    if (!isHidden('servingNoticePeriod') && d.servingNoticePeriod === 'true' && !d.lwd) e.lwd = 'LWD is required when serving notice period';
-    if (!isHidden('offersInHand') && d.offersInHand === 'true' && !d.offerPackage?.trim()) e.offerPackage = 'Package in hand is required';
+    const d = formData;
+
+    if (!d.firstName.trim()) {
+      e.firstName = 'First Name is required';
+    } else if (!/^[a-zA-Z\s'\-]{2,50}$/.test(d.firstName.trim())) {
+      e.firstName = 'First Name must be 2–50 characters (letters only)';
+    }
+
+    if (!d.lastName.trim()) {
+      e.lastName = 'Last Name is required';
+    } else if (!/^[a-zA-Z\s'\-]{1,50}$/.test(d.lastName.trim())) {
+      e.lastName = 'Last Name must be letters only';
+    }
+
+    if (!d.email.trim()) {
+      e.email = 'Email address is required';
+    } else if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(d.email.trim())) {
+      e.email = 'Enter a valid email ending with .com, .in, etc.';
+    } else if (errors.email && errors.email.includes('already exists')) {
+      e.email = errors.email;
+    }
+
+    if (!d.contact.trim()) {
+      e.contact = 'Contact number is required';
+    } else if (!/^[6-9]\d{9}$/.test(d.contact.replace(/[\s\-+]/g, ''))) {
+      e.contact = 'Enter a valid 10-digit Indian mobile number (starts with 6–9)';
+    } else if (errors.contact && errors.contact.includes('already exists')) {
+      e.contact = errors.contact;
+    }
+
+    if (d.alternateNumber.trim()) {
+      if (!/^[6-9]\d{9}$/.test(d.alternateNumber.replace(/[\s\-+]/g, ''))) {
+        e.alternateNumber = 'Enter a valid 10-digit mobile number';
+      } else if (d.contact.replace(/[\s\-+]/g, '') === d.alternateNumber.replace(/[\s\-+]/g, '')) {
+        e.alternateNumber = 'Alternate number must be different from primary contact';
+      }
+    }
+
+    if (!d.position.trim()) {
+      e.position = 'Current Role is required';
+    } else if (d.position.trim().length < 2) {
+      e.position = 'Current Role must be at least 2 characters';
+    }
+
+    const skills = normalizeSkills(d.skills);
+    if (skills.length === 0) {
+      e.skills = 'At least one skill is required';
+    } else if (skills.join(', ').length > 500) {
+      e.skills = 'Max 500 characters allowed';
+    }
+
+    if (d.totalExperience.trim() !== '') {
+      const totalExp = Number(d.totalExperience);
+      if (isNaN(totalExp) || !/^\d+(\.\d+)?$/.test(d.totalExperience.trim())) {
+        e.totalExperience = 'Must be a number (e.g. 5 or 5.5)';
+      } else if (totalExp < 0 || totalExp > 60) {
+        e.totalExperience = 'Experience must be between 0 and 60 years';
+      }
+    }
+
+    if (d.relevantExperience.trim() !== '') {
+      const relExp = Number(d.relevantExperience);
+      if (isNaN(relExp) || !/^\d+(\.\d+)?$/.test(d.relevantExperience.trim())) {
+        e.relevantExperience = 'Must be a number (e.g. 3 or 3.5)';
+      } else if (relExp < 0 || relExp > 60) {
+        e.relevantExperience = 'Experience must be between 0 and 60 years';
+      } else if (
+        d.totalExperience.trim() !== '' &&
+        !isNaN(Number(d.totalExperience)) &&
+        relExp > Number(d.totalExperience)
+      ) {
+        e.relevantExperience = 'Relevant experience cannot exceed total experience';
+      }
+    }
+
+    if (d.servingNoticePeriod === 'true' && !d.lwd) {
+      e.lwd = 'Last Working Day is required when serving notice period';
+    }
+
+    if (d.offersInHand === 'true' && !d.offerPackage.trim()) {
+      e.offerPackage = 'Please enter the offer package amount';
+    }
 
     if (d.dateOfBirth) {
-      const dob = new Date(d.dateOfBirth);
-      const age = (new Date() - dob) / (1000 * 60 * 60 * 24 * 365.25);
-      if (age < 18) e.dateOfBirth = 'Candidate must be atleast 18 years old';
-      else if (age > 100) e.dateOfBirth = 'Please enter a valid date of birth';
+      const todayDateStr = new Date().toLocaleDateString('en-CA');
+      if (d.dateOfBirth >= todayDateStr) {
+        e.dateOfBirth = 'Date of Birth must be in the past (not today or future)';
+      } else {
+        const dob = new Date(d.dateOfBirth);
+        const ageYears = (new Date() - dob) / (1000 * 60 * 60 * 24 * 365.25);
+        if (ageYears < 18) {
+          e.dateOfBirth = 'Candidate must be at least 18 years old';
+        } else if (ageYears > 80) {
+          e.dateOfBirth = 'Please enter a valid Date of Birth';
+        }
+      }
     }
 
-    // Experience Comparison
-    const totalMonths = parseInt(d.totalExperienceYears || 0) * 12 + parseInt(d.totalExperienceMonths || 0);
-    const relevantMonths = parseInt(d.relevantExperienceYears || 0) * 12 + parseInt(d.relevantExperienceMonths || 0);
-    if (relevantMonths > totalMonths) {
-      e.relevantExperience = 'Relevant experience cannot exceed total experience';
+    if (!d.dateAdded) {
+      e.dateAdded = 'Date Added is required';
+    } else {
+      const todayDateStr = new Date().toLocaleDateString('en-CA');
+      if (d.dateAdded > todayDateStr) {
+        e.dateAdded = 'Date Added cannot be a future date — only today or earlier is allowed';
+      }
     }
+
+    if (!d.status || d.status.length === 0) {
+      e.status = 'At least one status is required';
+    }
+
+    if (d.education && d.education.trim().length > 200) {
+      e.education = 'Qualification must be under 200 characters';
+    }
+
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
-  // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    // Final duplicate re-check before submit
     if (formData.email && /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(formData.email.trim())) {
-      const excludeParam = isEditMode && selectedCandidateId ? `&excludeId=${selectedCandidateId}` : '';
       try {
-        const res = await fetch(`${API_URL}/candidates/check-email?email=${encodeURIComponent(formData.email.trim())}${excludeParam}`, { headers: getAuthHeader() });
-        const data = await res.json();
-        if (data.exists) {
-          setErrors((prev) => ({ ...prev, email: `Already exists (ID: ${data.candidateId}${data.name ? ' — ' + data.name : ''})` }));
-          toast({ title: 'Duplicate Email', description: 'Email already registered.', variant: 'destructive' });
-          return;
+        const dupHeaders = getAuthHeader();
+        const excludeParam = isEditMode && selectedCandidateId ? `&excludeId=${selectedCandidateId}` : '';
+        const dupRes = await fetch(`${API_URL}/candidates/check-email?email=${encodeURIComponent(formData.email.trim())}${excludeParam}`, { headers: dupHeaders });
+        if (dupRes.ok) {
+          const dupData = await dupRes.json();
+          if (dupData.exists) {
+            const dupMsg = `A candidate with this email already exists (ID: ${dupData.candidateId}${dupData.name ? ' — ' + dupData.name : ''})`;
+            setErrors(prev => ({ ...prev, email: dupMsg }));
+            toast({ title: 'Duplicate Email', description: 'This email is already registered to another candidate.', variant: 'destructive' });
+            return;
+          }
         }
-      } catch { /* ignore */ }
+      } catch (_) { }
     }
+
     if (formData.contact) {
       const digits = formData.contact.replace(/\D/g, '').slice(-10);
       if (digits.length === 10) {
-        const excludeParam = isEditMode && selectedCandidateId ? `&excludeId=${selectedCandidateId}` : '';
         try {
-          const res = await fetch(`${API_URL}/candidates/check-phone?phone=${encodeURIComponent(digits)}${excludeParam}`, { headers: getAuthHeader() });
-          const data = await res.json();
-          if (data.exists) {
-            setErrors((prev) => ({ ...prev, contact: `Already exists (ID: ${data.candidateId}${data.name ? ' — ' + data.name : ''})` }));
-            toast({ title: 'Duplicate Phone', description: 'Phone already registered.', variant: 'destructive' });
-            return;
+          const phHeaders = getAuthHeader();
+          const excludeParam = isEditMode && selectedCandidateId ? `&excludeId=${selectedCandidateId}` : '';
+          const phRes = await fetch(`${API_URL}/candidates/check-phone?phone=${encodeURIComponent(digits)}${excludeParam}`, { headers: phHeaders });
+          if (phRes.ok) {
+            const phData = await phRes.json();
+            if (phData.exists) {
+              const phMsg = `A candidate with this phone already exists (ID: ${phData.candidateId}${phData.name ? ' — ' + phData.name : ''})`;
+              setErrors(prev => ({ ...prev, contact: phMsg }));
+              toast({ title: 'Duplicate Phone', description: 'This phone number is already registered to another candidate.', variant: 'destructive' });
+              return;
+            }
           }
-        } catch { /* ignore */ }
+        } catch (_) { }
       }
     }
 
@@ -834,272 +1084,259 @@ export default function AdminCandidates() {
       const url = isEditMode ? `${API_URL}/candidates/${selectedCandidateId}` : `${API_URL}/candidates`;
       const method = isEditMode ? 'PUT' : 'POST';
 
-      const payload = {
-        ...formData,
-        name: `${formData.firstName} ${formData.lastName}`.trim(),
-        offersInHand: formData.offersInHand === 'true',
-        servingNoticePeriod: formData.servingNoticePeriod === 'true',
-        customFields: JSON.stringify(formData.customFields || {}),
-      };
+      const computedName = `${formData.firstName || ''} ${formData.lastName || ''}`.trim();
+      const resolvedPosition = formData.position.trim();
 
-      const fd = new FormData();
-      // Append resume file if present
-      if (formData.resume instanceof File) fd.append('resume', formData.resume);
-      Object.entries(payload).forEach(([key, val]) => {
-        if (key === 'resume') return; // already appended above
-        if (key === 'status' && Array.isArray(val)) {
-          val.forEach(s => fd.append('status', s));
-        } else if (val !== undefined && val !== null && val !== '')
-          fd.append(key, String(val));
-      });
+      const allRows = Array.isArray(formData.submissions) ? formData.submissions : [];
+      const existingRows = allRows.filter((r) => r.isExisting && r._id);
+      const incompleteRow = allRows.some((r) => !r.isExisting && (r.clientName || r.jobId) && !(r.clientName && r.jobId));
+      if (incompleteRow) {
+        toast({ title: 'Incomplete Submission', description: 'Select both client and job, or remove the incomplete submission row.', variant: 'destructive' });
+        setIsSubmitting(false);
+        return;
+      }
+      const newRows = allRows.filter((r) => !r.isExisting && r.clientName && r.jobId);
 
-      const headers = getAuthHeader();
-      delete headers['Content-Type'];
-      const res = await fetch(url, { method, headers, body: fd });
-      if (!res.ok) throw new Error(await res.text());
-      const saved = await res.json();
-
-      if (isEditMode) {
-        setCandidates((prev) => prev.map((c) => c._id === selectedCandidateId ? { ...c, ...saved } : c));
-      } else {
-        if (selectedDeliverClientId) {
-          const jobIdSelect = document.getElementById('deliver-job-select');
-          await handleDeliverToClient(selectedDeliverClientId, jobIdSelect ? jobIdSelect.value : '', saved._id);
-        } else {
-          setCandidates((prev) => [saved, ...prev]);
+      if (newRows.length > 0) {
+        const seenJobIds = new Set(existingRows.map((r) => r.jobId));
+        for (const sub of newRows) {
+          if (seenJobIds.has(sub.jobId)) {
+            toast({ title: 'Duplicate Submission', description: `Job ${sub.jobCode || sub.jobId} is already submitted. Remove the duplicate.`, variant: 'destructive' });
+            setIsSubmitting(false);
+            return;
+          }
+          seenJobIds.add(sub.jobId);
         }
       }
-      toast({ title: 'Success', description: `Candidate ${isEditMode ? 'updated' : 'added'} successfully.` });
+
+      const payload = {
+        ...formData,
+        name: computedName,
+        position: resolvedPosition,
+        offersInHand: formData.offersInHand === 'true',
+        servingNoticePeriod: formData.servingNoticePeriod === 'true',
+        status: formData.status,
+        customFields: formData.customFields || {},
+        skills: normalizeSkills(formData.skills),
+      };
+      delete payload.positionOther;
+      delete payload.submissions;
+
+      if (!isEditMode) {
+        const cleanNewRows = allRows.filter((s) => s.clientName && s.jobId).map((s) => ({
+          clientName: s.clientName,
+          jobId: s.jobId,
+          jobCode: s.jobCode,
+          position: s.position,
+          pipelineStage: s.pipelineStage || 'Pipeline',
+          status: s.pipelineStage || 'Pipeline',
+        }));
+        if (cleanNewRows.length > 0) payload.submissions = cleanNewRows;
+      }
+
+      const headers = getAuthHeader();
+      const res = await fetch(url, { method, headers, body: JSON.stringify(payload) });
+      if (!res.ok) throw new Error(await res.text());
+      const savedCandidate = await res.json();
+
+      if (isEditMode) {
+        const subPromises = [];
+
+        for (const row of existingRows) {
+          if (row._originalStage && row.pipelineStage !== row._originalStage) {
+            subPromises.push(
+              fetch(`${API_URL}/submissions/${row._id}`, {
+                method: 'PUT',
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pipelineStage: row.pipelineStage, status: row.pipelineStage }),
+              }).catch((e) => console.error('Stage update failed:', e))
+            );
+          }
+        }
+
+        for (const row of newRows) {
+          subPromises.push(
+            fetch(`${API_URL}/submissions`, {
+              method: 'POST',
+              headers: { ...headers, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                candidateId: selectedCandidateId,
+                clientName: row.clientName,
+                jobId: row.jobId,
+                pipelineStage: row.pipelineStage || 'Pipeline',
+                status: row.pipelineStage || 'Pipeline',
+              }),
+            })
+              .then(async (r) => {
+                const body = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(body.message || 'Submission failed');
+                return body;
+              })
+              .catch((e) => {
+                console.error('New submission failed:', e);
+                throw e;
+              })
+          );
+        }
+
+        const subResults = await Promise.allSettled(subPromises);
+        const failedCount = subResults.filter((r) => r.status === 'rejected').length;
+        const failedMessage = subResults.find((r) => r.status === 'rejected')?.reason?.message;
+
+        const stageChanges = existingRows.filter((r) => r._originalStage !== r.pipelineStage).length;
+        let desc = 'Candidate updated successfully.';
+        if (stageChanges > 0) desc += ` ${stageChanges} pipeline stage(s) updated.`;
+        if (newRows.length > 0) desc += ` ${newRows.length} new submission(s) added.`;
+        if (failedCount > 0) desc += ` ${failedCount} submission update(s) failed.${failedMessage ? ` ${failedMessage}` : ''}`;
+        toast({ title: failedCount > 0 ? 'Partial Save' : 'Success', description: desc, variant: failedCount > 0 ? 'destructive' : 'default' });
+      } else {
+        const subCount = Array.isArray(savedCandidate.submissions) ? savedCandidate.submissions.length : 0;
+        const subErrCount = Array.isArray(savedCandidate.submissionErrors) ? savedCandidate.submissionErrors.length : 0;
+        let desc = 'Candidate added successfully.';
+        if (subCount > 0) desc += ` ${subCount} submission(s) saved.`;
+        if (subErrCount > 0) desc += ` ${subErrCount} submission(s) failed.`;
+        toast({ title: 'Success', description: desc });
+      }
+
+      await fetchData();
       setIsDialogOpen(false);
     } catch (err) {
       const msg = err.message || '';
       if (msg.toLowerCase().includes('email') || msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('e11000')) {
-        setErrors((prev) => ({ ...prev, email: 'Email already exists in the database.' }));
-        toast({ title: 'Duplicate Email', description: 'Email already registered.', variant: 'destructive' });
+        setErrors((prev) => ({ ...prev, email: 'A candidate with this email already exists in the database.' }));
+        toast({ title: 'Duplicate Email', description: 'This email is already registered to another candidate.', variant: 'destructive' });
       } else {
-        toast({ title: 'Error', description: 'Failed to save candidate.', variant: 'destructive' });
+        toast({ title: 'Error', description: 'Failed to save', variant: 'destructive' });
       }
     } finally {
       setIsSubmitting(false);
-      setSelectedDeliverClientId('');
     }
   };
 
-  // ── Delete ────────────────────────────────────────────────────────────────
   const handleDelete = async (id) => {
-    if (!confirm('Delete this candidate? This cannot be undone.')) return;
+    if (!confirm('Are you sure you want to delete this candidate?')) return;
     try {
       await fetch(`${API_URL}/candidates/${id}`, { method: 'DELETE', headers: getAuthHeader() });
-      toast({ title: 'Deleted', description: 'Candidate removed.' });
-      setCandidates((prev) => prev.filter((c) => c._id !== id));
-    } catch {
-      toast({ title: 'Error', description: 'Delete failed.', variant: 'destructive' });
-    }
-  };
-
-  const refreshViewingCandidate = async (candidateId) => {
-    try {
-      const headers = getAuthHeader();
-      const res = await fetch(`${API_URL}/candidates/${candidateId}`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setViewingCandidate(data);
-        setCandidates(prev => prev.map(c => c._id === candidateId ? { ...c, submissions: data.submissions } : c));
-      }
+      toast({ title: 'Deleted', description: 'Candidate removed' });
+      setCandidates(prev => prev.filter(c => c._id !== id));
     } catch (err) {
-      console.error("Error refreshing candidate details", err);
-    }
-  };
-
-  const handleDeliverToClient = async (clientId, jobId, specificCandidateId = null) => {
-    const cid = specificCandidateId || (viewingCandidate && viewingCandidate._id);
-    if (!clientId || !cid) return;
-    try {
-      const headers = getAuthHeader();
-      const res = await fetch(`${API_URL}/submissions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          candidateId: cid,
-          clientId,
-          jobId: jobId || undefined
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        if (!specificCandidateId) {
-          toast({ title: 'Success', description: 'Candidate delivered to client successfully.' });
-          await refreshViewingCandidate(cid);
-        }
-        fetchData();
-      } else {
-        toast({ title: 'Error', description: data.message || 'Failed to deliver candidate', variant: 'destructive' });
-      }
-    } catch (err) {
-      toast({ title: 'Error', description: 'Failed to deliver candidate', variant: 'destructive' });
-    }
-  };
-
-  const handleUpdateSubmission = async (submissionId, status, remarks) => {
-    try {
-      const headers = getAuthHeader();
-      const res = await fetch(`${API_URL}/submissions/${submissionId}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ status, remarks })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Submission updated successfully.' });
-        await refreshViewingCandidate(viewingCandidate._id);
-        fetchData();
-      } else {
-        toast({ title: 'Error', description: data.message || 'Failed to update submission', variant: 'destructive' });
-      }
-    } catch (err) {
-      toast({ title: 'Error', description: 'Failed to update submission', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Delete failed', variant: 'destructive' });
     }
   };
 
   const handleDeleteSubmission = async (submissionId) => {
-    if (!window.confirm('Are you sure you want to retract/delete this delivery?')) return;
-    try {
-      const headers = getAuthHeader();
-      const res = await fetch(`${API_URL}/submissions/${submissionId}`, {
-        method: 'DELETE',
-        headers
-      });
-      const data = await res.json();
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Submission deleted successfully.' });
-        await refreshViewingCandidate(viewingCandidate._id);
-        fetchData();
-      } else {
-        toast({ title: 'Error', description: data.message || 'Failed to delete submission', variant: 'destructive' });
-      }
-    } catch (err) {
-      toast({ title: 'Error', description: 'Failed to delete submission', variant: 'destructive' });
+    const headers = getAuthHeader();
+    const res = await fetch(`${API_URL}/submissions/${submissionId}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || 'Failed to delete submission');
     }
+    toast({ title: 'Submission removed', description: 'The client/job submission was deleted.' });
   };
 
-  // ── Open Dialogs ──────────────────────────────────────────────────────────
   const openAddDialog = () => {
     setIsEditMode(false);
     setSelectedCandidateId(null);
-    setSelectedDeliverClientId('');
-    setViewingCandidate(null);
     setFormData(initialFormData);
     setErrors({});
     setResumeSuccess({ show: false, fileName: '', fieldsCount: 0 });
     setIsDialogOpen(true);
   };
 
-  const setEditFormFromCandidate = (candidate) => {
-    const jobTitles = jobs.map((j) => j.title || j.jobTitle || j.position || '').filter(Boolean);
-    const savedPos = candidate.position || '';
-    const isKnownJob = jobTitles.includes(savedPos);
-    setFormData({
-      firstName: candidate.firstName || '',
-      lastName: candidate.lastName || '',
-      contact: candidate.contact || '',
-      alternateNumber: candidate.alternateNumber || '',
-      email: candidate.email || '',
-      dateOfBirth: candidate.dateOfBirth ? getSafeDate(candidate.dateOfBirth) : '',
-      dateAdded: candidate.dateAdded ? getSafeDate(candidate.dateAdded) : '',
-      gender: candidate.gender || '',
-      linkedin: candidate.linkedin || '',
-      currentLocation: candidate.currentLocation || '',
-      preferredLocation: candidate.preferredLocation || '',
-      position: isKnownJob || !savedPos ? savedPos : 'Other',
-      positionOther: !isKnownJob && savedPos ? savedPos : '',
-      client: candidate.client || '',
-      clientCandidateId: candidate.clientCandidateId || '',
-      currentCompany: candidate.currentCompany || '',
-      industry: candidate.industry || '',
-      totalExperience: candidate.totalExperience || '',
-      totalExperienceYears: (candidate.totalExperience || '').split('yrs')[0]?.trim() || '0',
-      totalExperienceMonths: (candidate.totalExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
-      relevantExperience: candidate.relevantExperience || '',
-      relevantExperienceYears: (candidate.relevantExperience || '').split('yrs')[0]?.trim() || '0',
-      relevantExperienceMonths: (candidate.relevantExperience || '').split('yrs')[1]?.replace('months', '')?.trim() || '0',
-      education: candidate.education || '',
-      ctc: candidate.ctc || '',
-      currentTakeHome: candidate.currentTakeHome || '',
-      ectc: candidate.ectc || '',
-      expectedTakeHome: candidate.expectedTakeHome || '',
-      noticePeriod: candidate.noticePeriod || '',
-      servingNoticePeriod: candidate.servingNoticePeriod ? 'true' : 'false',
-      lwd: candidate.lwd ? getSafeDate(candidate.lwd) : '',
-      reasonForChange: candidate.reasonForChange || '',
-      offersInHand: candidate.offersInHand ? 'true' : 'false',
-      offerPackage: candidate.offerPackage || '',
-      source: candidate.source || 'Portal',
-      status: (() => {
-        if (Array.isArray(candidate.status)) return candidate.status;
-        if (typeof candidate.status === 'string') return candidate.status.split(',').map(s => s.trim()).filter(Boolean);
-        return ['Submitted'];
-      })(),
-      recruiterId: typeof candidate.recruiterId === 'object' ? candidate.recruiterId?._id : candidate.recruiterId || '',
-      skills: Array.isArray(candidate.skills) ? candidate.skills.join(', ') : candidate.skills || '',
-      remarks: candidate.remarks || '',
-      customFields: candidate.customFields || {},
-    });
-  };
-
-  const openEditDialog = async (c) => {
+  const openEditDialog = (c) => {
     setIsEditMode(true);
     setSelectedCandidateId(c._id);
-    setSelectedDeliverClientId('');
-    let candidateForEdit = c;
-    try {
-      const headers = getAuthHeader();
-      const res = await fetch(`${API_URL}/candidates/${c._id}`, { headers });
-      if (res.ok) {
-        candidateForEdit = await res.json();
-      }
-    } catch (err) {
-      console.error("Error loading details for edit modal:", err);
-    }
-    setViewingCandidate(candidateForEdit);
-    setEditFormFromCandidate(candidateForEdit);
+
+    setFormData({
+      firstName: c.firstName || '',
+      lastName: c.lastName || '',
+      contact: c.contact || '',
+      alternateNumber: c.alternateNumber || '',
+      email: c.email || '',
+      dateOfBirth: c.dateOfBirth ? new Date(c.dateOfBirth).toISOString().split('T')[0] : '',
+      currentLocation: c.currentLocation || '',
+      preferredLocation: c.preferredLocation || '',
+      position: c.position || '',
+      positionOther: '',
+      client: c.client || '',
+      currentCompany: c.currentCompany || '',
+      totalExperience: c.totalExperience || '',
+      relevantExperience: c.relevantExperience || '',
+      education: c.education || '',
+      ctc: c.ctc || '',
+      currentTakeHome: c.currentTakeHome || '',
+      ectc: c.ectc || '',
+      expectedTakeHome: c.expectedTakeHome || '',
+      noticePeriod: c.noticePeriod || '',
+      servingNoticePeriod: c.servingNoticePeriod ? 'true' : 'false',
+      lwd: c.lwd ? new Date(c.lwd).toISOString().split('T')[0] : '',
+      reasonForChange: c.reasonForChange || '',
+      offersInHand: c.offersInHand ? 'true' : 'false',
+      offerPackage: c.offerPackage || '',
+      source: c.source || 'Portal',
+      status: Array.isArray(c.status) ? c.status : [c.status || 'Submitted'],
+      recruiterId: typeof c.recruiterId === 'object' ? c.recruiterId?._id : c.recruiterId || '',
+      skills: normalizeSkills(c.skills),
+      remarks: c.remarks || '',
+      dateAdded: c.dateAdded ? new Date(c.dateAdded).toISOString().split('T')[0] : '',
+      customFields: c.customFields || {},
+      submissions: [],
+    });
     setErrors({});
     setIsDialogOpen(true);
+
+    setIsLoadingSubmissions(true);
+    const headers = getAuthHeader();
+    fetch(`${API_URL}/submissions?candidateId=${c._id}`, { headers })
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => {
+        const rows = Array.isArray(data) ? data.map((sub) => ({
+          _id: sub._id,
+          clientName: sub.clientName || '',
+          jobId: typeof sub.jobId === 'object' ? sub.jobId._id : sub.jobId || '',
+          jobCode: sub.jobCode || (sub.jobId?.jobCode) || '',
+          position: sub.position || (sub.jobId?.position) || '',
+          pipelineStage: sub.pipelineStage || sub.status || 'Pipeline',
+          _originalStage: sub.pipelineStage || sub.status || 'Pipeline',
+          isExisting: true,
+        })) : [];
+        setFormData((prev) => ({ ...prev, submissions: rows }));
+      })
+      .catch(() => { })
+      .finally(() => setIsLoadingSubmissions(false));
   };
 
-  // ── Sort ──────────────────────────────────────────────────────────────────
   const handleSort = (key) => {
-    setSortConfig((prev) => ({
-      key,
-      direction: prev?.key === key && prev?.direction === 'asc' ? 'desc' : 'asc',
-    }));
+    let direction = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+    setSortConfig({ key, direction });
   };
+
   const SortIcon = ({ field }) => {
     if (!sortConfig || sortConfig.key !== field) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
     return sortConfig.direction === 'asc' ? <ArrowUp className="h-3 w-3 ml-1 text-blue-500" /> : <ArrowDown className="h-3 w-3 ml-1 text-blue-500" />;
   };
 
-  // ── Filtered / Sorted / Paginated Candidates ──────────────────────────────
   const filteredCandidates = useMemo(() => {
-    const roleSearch = roleSearchTerm.toLowerCase();
-    const roleSearchTerms = parseSearchTerms(roleSearchTerm);
     let result = candidates.filter((c) => {
-      const matchSearch = (c.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (c.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (c.candidateId || '').toLowerCase().includes(searchTerm.toLowerCase());
-        
-      const skillText = (Array.isArray(c.skills) ? c.skills.join(' ') : c.skills || '').toLowerCase();
-      const roleMatch = !roleSearchTerm || 
-        (c.position && c.position.toLowerCase().includes(roleSearch)) ||
-        roleSearchTerms.every(term => skillText.includes(term));
-        
-      const statusArr = Array.isArray(c.status) ? c.status : [c.status || ''];
+      const matchSearch = candidateMatchesKeywordBadges(c, searchKeywords);
+
+      const statusArr = getCandidateStatuses(c);
       const matchStatus = statusFilter === 'all' || statusArr.includes(statusFilter);
+
       const recId = typeof c.recruiterId === 'object' ? c.recruiterId?._id : c.recruiterId;
       const matchRec = recruiterFilter === 'all' || recId === recruiterFilter;
-      const matchClient = clientFilter === 'all' || c.client === clientFilter;
+
+      const matchClient = candidateMatchesClient(c, clientFilter);
+
       const statMatch = activeStatFilter ? statusArr.includes(activeStatFilter) : true;
-      return matchSearch && roleMatch && matchStatus && matchRec && matchClient && statMatch;
+
+      return matchSearch && matchStatus && matchRec && matchClient && statMatch;
     });
+
     if (sortConfig) {
       result.sort((a, b) => {
         const av = a[sortConfig.key] || '';
@@ -1110,81 +1347,101 @@ export default function AdminCandidates() {
       });
     }
     return result;
-  }, [candidates, searchTerm, roleSearchTerm, statusFilter, recruiterFilter, clientFilter, activeStatFilter, sortConfig]);
+  }, [candidates, searchKeywords, statusFilter, recruiterFilter, clientFilter, activeStatFilter, sortConfig]);
 
   const stats = useMemo(() => {
-    const count = (s) => candidates.filter((c) => (Array.isArray(c.status) ? c.status : [c.status || '']).includes(s)).length;
-    const todayD = getSafeDate(new Date());
-    const todayCount = candidates.filter((c) => getSafeDate(c.dateAdded || c.createdAt) === todayD).length;
+    const count = (s) => candidates.filter((c) => getCandidateStatuses(c).includes(s)).length;
+    const todayDate = getSafeDate(new Date());
+    const todayCount = candidates.filter(c => {
+      const d = c.dateAdded || c.createdAt;
+      return getSafeDate(d) === todayDate;
+    }).length;
+
     return {
-      total: candidates.length, turnups: count('Turnups'), noShow: count('No Show'),
-      yetToAttend: count('Yet to attend'), selected: count('Selected'), rejected: count('Rejected'),
-      hold: count('Hold'), pipeline: count('Pipeline'), joined: count('Joined'), backout: count('Backout'),
-      sharedProfiles: count('Shared Profiles'), todaySubmissions: todayCount,
+      total: candidates.length, turnups: count('Turnups'), noShow: count('No Show'), yetToAttend: count('Yet to attend'),
+      selected: count('Selected'), rejected: count('Rejected'), hold: count('Hold'), pipeline: count('Pipeline'),
+      joined: count('Joined'), backout: count('Backout'), sharedProfiles: count('Shared Profiles'),
+      todaySubmissions: todayCount,
     };
   }, [candidates]);
 
+  // --- PAGINATION LOGIC ---
   const totalPages = Math.ceil(filteredCandidates.length / ITEMS_PER_PAGE);
-  const paginatedCandidates = filteredCandidates.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+  const paginatedCandidates = filteredCandidates.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+  const visibleCandidateIds = paginatedCandidates.map((candidate) => candidate._id);
+  const allVisibleCandidatesSelected = visibleCandidateIds.length > 0
+    && visibleCandidateIds.every((candidateId) => selectedIds.includes(candidateId));
+  const selectedCandidateRecords = useMemo(() => {
+    const candidatesById = new Map(candidates.map((candidate) => [String(candidate._id), candidate]));
+    return selectedIds.map((candidateId) => candidatesById.get(String(candidateId))).filter(Boolean);
+  }, [candidates, selectedIds]);
+  const selectedInvalidEmailCount = selectedCandidateRecords.filter((candidate) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(candidate.email || '').trim())).length;
 
-  // ── Export ────────────────────────────────────────────────────────────────
+  const candidateExportColumns = useMemo(() => [
+    { key: 'candidateId', label: 'Candidate ID', value: c => c.candidateId || c._id?.slice(-6).toUpperCase() || '' },
+    { key: 'firstName', label: 'First Name', value: c => c.firstName || '' },
+    { key: 'lastName', label: 'Last Name', value: c => c.lastName || '' },
+    { key: 'fullName', label: 'Full Name', value: c => c.name || '' },
+    {
+      key: 'recruiter',
+      label: 'Recruiter',
+      value: c => typeof c.recruiterId === 'object' ? getRecruiterName(c.recruiterId) : c.recruiterName || '',
+    },
+    { key: 'email', label: 'Email', value: c => c.email || '' },
+    { key: 'contact', label: 'Contact', value: c => c.contact || '' },
+    { key: 'status', label: 'Status', value: c => Array.isArray(c.status) ? c.status.join(' | ') : (c.status || '') },
+    { key: 'currentLocation', label: 'Current Location', value: c => c.currentLocation || '' },
+    { key: 'preferredLocation', label: 'Preferred Location', value: c => c.preferredLocation || '' },
+    { key: 'totalExperience', label: 'Total Experience', value: c => c.totalExperience || '' },
+    { key: 'relevantExperience', label: 'Relevant Experience', value: c => c.relevantExperience || '' },
+    { key: 'education', label: 'Qualification', value: c => c.education || '' },
+    { key: 'currentCompany', label: 'Current Company', value: c => c.currentCompany || '' },
+    { key: 'reasonForChange', label: 'Reason For Change', value: c => c.reasonForChange || '' },
+    { key: 'ctc', label: 'Current CTC', value: c => c.ctc || '' },
+    { key: 'currentTakeHome', label: 'Current Take Home', value: c => c.currentTakeHome || '' },
+    { key: 'ectc', label: 'Expected CTC', value: c => c.ectc || '' },
+    { key: 'expectedTakeHome', label: 'Expected Take Home', value: c => c.expectedTakeHome || '' },
+    { key: 'noticePeriod', label: 'Notice Period', value: c => c.noticePeriod || '' },
+    { key: 'servingNoticePeriod', label: 'Serving Notice', value: c => c.servingNoticePeriod ? 'Yes' : 'No' },
+    { key: 'lwd', label: 'LWD', value: c => c.lwd ? new Date(c.lwd).toLocaleDateString('en-GB') : '' },
+    { key: 'offersInHand', label: 'Offers In Hand', value: c => c.offersInHand ? 'Yes' : 'No' },
+    { key: 'offerPackage', label: 'Offer Package', value: c => c.offerPackage || '' },
+    { key: 'source', label: 'Source', value: c => c.source || '' },
+    { key: 'skills', label: 'Skills', value: c => Array.isArray(c.skills) ? c.skills.join(' | ') : (c.skills || '') },
+    { key: 'dateAdded', label: 'Date Added', value: c => (c.dateAdded || c.createdAt) ? new Date(c.dateAdded || c.createdAt).toLocaleDateString('en-GB') : '' },
+  ], []);
+
   const handleExportExcel = () => {
     if (filteredCandidates.length === 0) {
-      toast({ title: 'No Data', description: 'Nothing to export.', variant: 'destructive' });
+      toast({ title: 'No Data', description: 'No candidates available to export.', variant: 'destructive' });
       return;
     }
-    try {
-      const rows = filteredCandidates.map((c) => {
-        const flatCustom = {};
-        if (c.customFields) Object.keys(c.customFields).forEach((k) => { flatCustom[`Custom: ${k}`] = c.customFields[k]; });
-        return {
-          'Candidate ID': c.candidateId || c._id?.slice(-6).toUpperCase() || '',
-          'First Name': c.firstName || '',
-          'Last Name': c.lastName || '',
-          'Full Name': c.name || '',
-          'Recruiter': typeof c.recruiterId === 'object' ? getRecruiterName(c.recruiterId) : c.recruiterName || '',
-          'Email': c.email || '',
-          'Contact': c.contact || '',
-          'Status': Array.isArray(c.status) ? (c.status[c.status.length - 1] || '') : (c.status || ''),
-          'Current Location': c.currentLocation || '',
-          'Preferred Location': c.preferredLocation || '',
-          'Total Experience': c.totalExperience || '',
-          'Relevant Experience': c.relevantExperience || '',
-          'Current Company': c.currentCompany || '',
-          'Reason For Change': c.reasonForChange || '',
-          'Current CTC': c.ctc || '',
-          'Current Take Home': c.currentTakeHome || '',
-          'Expected CTC': c.ectc || '',
-          'Expected Take Home': c.expectedTakeHome || '',
-          'Notice Period': c.noticePeriod || '',
-          'Serving Notice': c.servingNoticePeriod ? 'Yes' : 'No',
-          'LWD': c.lwd ? new Date(c.lwd).toLocaleDateString('en-GB') : '',
-          'Offers In Hand': c.offersInHand ? 'Yes' : 'No',
-          'Offer Package': c.offerPackage || '',
-          'Source': c.source || '',
-          'Skills': Array.isArray(c.skills) ? c.skills.join(' | ') : (c.skills || ''),
-          'Date Added': (c.dateAdded || c.createdAt) ? new Date(c.dateAdded || c.createdAt).toLocaleDateString('en-GB') : '',
-          ...flatCustom,
-        };
-      });
-      const ws = XLSX.utils.json_to_sheet(rows);
-      ws['!cols'] = Object.keys(rows[0] || {}).map((key) => ({ wch: Math.max(key.length, ...rows.map((r) => String(r[key] || '').length), 10) }));
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Candidates');
-      XLSX.writeFile(wb, `Candidates_Export_${todayStr}.xlsx`);
-      toast({ title: 'Exported!', description: `${rows.length} candidate(s) exported.` });
-    } catch {
-      toast({ title: 'Export failed', description: 'Could not export file.', variant: 'destructive' });
+    setIsExportDialogOpen(true);
+  };
+
+  const handleSelectAll = (e) => {
+    const visibleSet = new Set(visibleCandidateIds);
+    if (e.target.checked) {
+      setSelectedIds(prev => [...new Set([...prev, ...visibleCandidateIds])]);
+    } else {
+      setSelectedIds(prev => prev.filter(id => !visibleSet.has(id)));
     }
   };
 
-  // ── Bulk Select ───────────────────────────────────────────────────────────
-  const handleSelectAll = (e) => setSelectedIds(e.target.checked ? filteredCandidates.map((c) => c._id) : []);
-  const handleSelectOne = (e, id) => setSelectedIds((prev) => e.target.checked ? [...prev, id] : prev.filter((x) => x !== id));
+  const handleSelectOne = (e, id) => {
+    if (e.target.checked) {
+      setSelectedIds(prev => [...prev, id]);
+    } else {
+      setSelectedIds(prev => prev.filter(item => item !== id));
+    }
+  };
 
   const handleBulkAssign = async () => {
     if (!bulkRecruiterId) {
-      toast({ title: 'Error', description: 'Please select a recruiter first.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Please select a recruiter first', variant: 'destructive' });
       return;
     }
     setIsBulkAssigning(true);
@@ -1192,236 +1449,288 @@ export default function AdminCandidates() {
       const res = await fetch(`${API_URL}/candidates/bulk-assign`, {
         method: 'PUT',
         headers: getAuthHeader(),
-        body: JSON.stringify({ candidateIds: selectedIds, recruiterId: bulkRecruiterId }),
+        body: JSON.stringify({
+          candidateIds: selectedIds,
+          recruiterId: bulkRecruiterId
+        })
       });
+
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      toast({ title: 'Success', description: data.message });
-      setCandidates((prev) => prev.map((c) => selectedIds.includes(c._id) ? { ...c, recruiterId: bulkRecruiterId } : c));
+
+      toast({ title: 'Success', description: data.message || `Successfully assigned ${selectedIds.length} candidates` });
+      setCandidates(prev => prev.map(c =>
+        selectedIds.includes(c._id) ? { ...c, recruiterId: bulkRecruiterId } : c
+      ));
       setSelectedIds([]);
       setBulkRecruiterId('');
-    } catch {
-      toast({ title: 'Error', description: 'Failed to assign.', variant: 'destructive' });
+    } catch (err) {
+      toast({ title: 'Error', description: 'Failed to assign candidates', variant: 'destructive' });
     } finally {
       setIsBulkAssigning(false);
     }
   };
 
-  // ── Settings Modal Functions ──────────────────────────────────────────────
-  // ── Bulk Import Handlers ────────────────────────────────────────────────
-  const resetImportState = () => {
-    setImportParsedData(null);
-    setImportParseProgress(0);
-    setIsParsing(false);
-    setIsImporting(false);
-    setImportResult(null);
-    setImportDragOver(false);
-    setImportFileName('');
-    if (importFileInputRef.current) importFileInputRef.current.value = '';
+  const handleJobInviteResult = (result) => {
+    if (!result || result.error) return;
+    const hasIssues = (result.failed || 0) > 0 || (result.skipped || 0) > 0;
+    toast({
+      title: hasIssues ? 'Invitations partially sent' : 'Invitations sent',
+      description: `${result.sent || 0} invitations sent, ${result.failed || 0} failed, ${result.skipped || 0} skipped.`,
+      variant: hasIssues ? 'destructive' : 'default',
+    });
   };
 
-  const openImportModal = () => { resetImportState(); setIsImportModalOpen(true); };
-
-  const processImportFile = async (file) => {
-    if (!file) return;
-    if (!isValidFileType(file)) {
-      toast({ title: 'Invalid file type', description: 'Only .xlsx, .xls, and .csv are supported.', variant: 'destructive' });
-      return;
-    }
-    setImportFileName(file.name);
-    setIsParsing(true);
-    setImportParseProgress(0);
-    setImportParsedData(null);
-    setImportResult(null);
-    try {
-      const result = await parseExcelToCandidates(file, setImportParseProgress);
-      setImportParsedData(result);
-    } catch (err) {
-      toast({ title: 'Parse error', description: err.message, variant: 'destructive' });
-      setImportFileName('');
-    } finally {
-      setIsParsing(false);
-    }
+  const handleWhatsApp = (c) => {
+    if (!c.contact) return;
+    let phone = c.contact.replace(/\D/g, '');
+    if (phone.length === 10) phone = '91' + phone;
+    const msg = `Hi ${c.firstName || c.name.split(' ')[0]}, regarding your application for ${c.position} at ${c.client}.`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
-  const handleImportFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) processImportFile(file);
-  };
+  const renderMatchingJobsModal = () => {
+    if (!matchingJobsCandidate) return null;
 
-  const handleImportDrop = (e) => {
-    e.preventDefault();
-    setImportDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) processImportFile(file);
-  };
+    return (
+      <ModalPortal>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-955/60 backdrop-blur-sm" onClick={() => setMatchingJobsCandidate(null)} />
+          <div className="relative flex max-h-[90vh] w-[95vw] max-w-7xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between bg-slate-950 p-6 text-white">
+              <div>
+                <h2 className="text-xl font-bold tracking-tight text-white">Matching Jobs – {matchingJobsCandidate.name}</h2>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+                  <span className="font-mono bg-slate-800 px-2 py-0.5 rounded text-white">{getCandidateId(matchingJobsCandidate)}</span>
+                  <span>•</span>
+                  <span>{matchingJobsCandidate.position || 'No Role Specified'}</span>
+                  <span>•</span>
+                  <span>Skills: {Array.isArray(matchingJobsCandidate.skills) ? matchingJobsCandidate.skills.join(', ') : (matchingJobsCandidate.skills || 'N/A')}</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setMatchingJobsCandidate(null)}
+                className="rounded-lg p-2 text-slate-300 hover:bg-white/10 hover:text-white cursor-pointer"
+              >
+                <X className="h-5 w-5 text-white" />
+              </button>
+            </div>
 
-  const handleConfirmImport = async () => {
-    if (!importParsedData || importParsedData.validRows.length === 0) return;
-    setIsImporting(true);
-    try {
-      const res = await fetch(`${API_URL}/candidates/bulk-import`, {
-        method: 'POST',
-        headers: getAuthHeader(),
-        body: JSON.stringify({ candidates: importParsedData.validRows, fileName: importFileName }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Import failed');
-      setImportResult(data);
-      toast({ title: 'Import Complete', description: `${data.importedSuccessfully} imported, ${data.failedRecords} failed, ${data.duplicatesSkipped} duplicates skipped.` });
-      if (data.importedSuccessfully > 0) fetchData();
-    } catch (err) {
-      toast({ title: 'Import Failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setIsImporting(false);
-    }
-  };
+            <div className="flex-1 overflow-y-auto bg-slate-50 p-6 sleek-scrollbar">
+              {loadingMatchingJobs ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                  <p className="text-sm font-medium text-slate-600 animate-pulse">Calculating matching scores...</p>
+                </div>
+              ) : matchingJobsError ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800 text-sm mb-4">
+                  ⚠️ {matchingJobsError}
+                </div>
+              ) : matchingJobs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <Briefcase className="h-12 w-12 text-slate-300 mb-2" />
+                  <p className="text-sm font-medium text-slate-600">No jobs matched the required skills and role.</p>
+                </div>
+              ) : (
+                  <div className="space-y-4">
+                    {matchingJobs.map((item) => {
+                      const { job, finalScore, matchPercentage, matchLevel, roleMatchLevel, matchedMandatorySkills, missingMandatorySkills, matchedPreferredSkills, missingPreferredSkills, experienceMatch, qualificationMatch, reason, breakdown, scoringSource, source } = item;
+                      const jobId = job._id || job.id;
+                      const scoreVal = finalScore ?? matchPercentage ?? 0;
+                      const expanded = expandedJobId === jobId;
+                      const resolvedSource = scoringSource || source || 'fallback';
 
-  const handleDownloadErrorReport = () => {
-    if (!importResult?.errors?.length) return;
-    const rows = importResult.errors.map(e => ({ 'Row': e.row, 'Candidate Name': e.candidateName || '', 'Email': e.email || '', 'Reason': e.reason || '' }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 32 }, { wch: 50 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Import Errors');
-    XLSX.writeFile(wb, `import_errors_${new Date().toISOString().split('T')[0]}.xlsx`);
-  };
+                      return (
+                        <div key={jobId} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded-md bg-blue-50 border border-blue-100 px-2 py-0.5 font-mono text-xs text-blue-600 font-bold">
+                                  {job.jobCode}
+                                </span>
+                                <h3 className="font-bold text-slate-900 text-base">{job.position}</h3>
+                                <span className="text-slate-350">•</span>
+                                <span className="text-sm text-slate-500 font-medium">{job.clientName}</span>
+                              </div>
+                              <p className="mt-1.5 text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
+                                <span>📍 {job.location || 'Location not set'}</span>
+                                <span>•</span>
+                                <span>Role Match: <strong className="capitalize text-slate-700">{roleMatchLevel || 'N/A'}</strong></span>
+                                <span>•</span>
+                                <span>Experience Req: <strong className="text-slate-700">{job.experience ? `${job.experience} Years` : 'Any'}</strong></span>
+                              </p>
+                            </div>
 
-  const handleOpenSettings = () => {
-    setTempHiddenFields(tenantSettings.hiddenFields || []);
-    setTempCustomFields(tenantSettings.customFields || []);
-    setNewFieldName('');
-    setNewFieldType('text');
-    setEditingFieldIndex(null);
-    setIsSettingsOpen(true);
-  };
+                            <div className="flex items-center gap-3 justify-between sm:justify-end">
+                              <div className="flex items-center gap-2">
+                                <ScoreBadge score={scoreVal} />
+                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                                  {matchLevel || 'Match'}
+                                </span>
+                              </div>
+                              
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedJobId(expanded ? null : jobId)}
+                                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors cursor-pointer"
+                                  title={expanded ? "Hide Details" : "Show Details"}
+                                >
+                                  <svg className={`h-5 w-5 transform transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                    <polyline points="6 9 12 15 18 9" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => setViewingJobDetails(job)}
+                                  className="px-3 py-1.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer transition"
+                                  title="View Job Details"
+                                >
+                                  Details
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const candidate = matchingJobsCandidate;
+                                    setMatchingJobsCandidate(null);
+                                    openEditDialog(candidate);
+                                  }}
+                                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer transition text-white"
+                                >
+                                  Submit
+                                </button>
+                              </div>
+                            </div>
+                          </div>
 
-  const handleToggleHiddenField = (fieldId) =>
-    setTempHiddenFields((prev) => prev.includes(fieldId) ? prev.filter((id) => id !== fieldId) : [...prev, fieldId]);
+                          {expanded && (
+                            <div className="mt-4 border-t border-slate-150 pt-4 space-y-4 animate-in fade-in duration-200">
+                              {resolvedSource === 'fallback' && (
+                                <div className="rounded-lg bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800 border border-amber-250">
+                                  ⚠️ Advanced matching analysis was temporarily unavailable. Showing rule-based matching metrics.
+                                </div>
+                              )}
+                              
+                              <div className="grid gap-4 lg:grid-cols-2">
+                                <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide">Match Overview</h4>
+                                  <p className="text-sm text-slate-700 leading-relaxed font-medium">
+                                    {reason || 'Qualified matching profile based on job requirements and skills.'}
+                                  </p>
 
-  const handleEditCustomField = (index) => {
-    const f = tempCustomFields[index];
-    setNewFieldName(f.fieldName);
-    setNewFieldType(f.fieldType);
-    setEditingFieldIndex(index);
-  };
+                                  <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-slate-200">
+                                    <div className="text-xs">
+                                      <span className="text-slate-400 block uppercase font-bold tracking-wider text-[9px]">Role Match</span>
+                                      <span className="font-semibold text-slate-800 text-sm capitalize">{roleMatchLevel || 'N/A'}</span>
+                                    </div>
+                                    <div className="text-xs">
+                                      <span className="text-slate-400 block uppercase font-bold tracking-wider text-[9px]">Experience Req</span>
+                                      <span className="font-semibold text-slate-800 text-sm">{experienceMatch || (job.experience ? `${job.experience} Years` : 'N/A')}</span>
+                                    </div>
+                                    <div className="text-xs mt-2">
+                                      <span className="text-slate-400 block uppercase font-bold tracking-wider text-[9px]">Qualification</span>
+                                      <span className="font-semibold text-slate-800 text-sm">{qualificationMatch || (job.qualification || 'N/A')}</span>
+                                    </div>
+                                    <div className="text-xs mt-2">
+                                      <span className="text-slate-400 block uppercase font-bold tracking-wider text-[9px]">Scoring Model</span>
+                                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold border mt-0.5 ${
+                                        resolvedSource === 'groq' 
+                                          ? 'bg-indigo-50 border-indigo-200 text-indigo-700' 
+                                          : 'bg-slate-100 border-slate-200 text-slate-600'
+                                      }`}>
+                                        {resolvedSource === 'groq' ? 'Advanced Match' : 'Rule-Based Score'}
+                                      </span>
+                                    </div>
+                                  </div>
 
-  const handleAddOrUpdateCustomField = () => {
-    if (!newFieldName.trim()) {
-      toast({ title: 'Error', description: 'Field name is required.', variant: 'destructive' });
-      return;
-    }
-    const isDuplicate = tempCustomFields.some((f, idx) =>
-      idx !== editingFieldIndex && f.fieldName.toLowerCase() === newFieldName.trim().toLowerCase()
+                                  {breakdown && (
+                                    <div className="mt-4 pt-3 border-t border-slate-200">
+                                      <MatchBreakdownBar breakdown={breakdown} />
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Skill Alignments</h4>
+                                  <SkillChips
+                                    matchedMandatory={matchedMandatorySkills || []}
+                                    missingMandatory={missingMandatorySkills || []}
+                                    matchedPreferred={matchedPreferredSkills || []}
+                                    missingPreferred={missingPreferredSkills || []}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+              )}
+            </div>
+
+            <div className="flex justify-end border-t border-slate-200 bg-slate-50 p-4">
+              <button
+                onClick={() => setMatchingJobsCandidate(null)}
+                className="px-5 py-2.5 border border-slate-300 bg-white rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </ModalPortal>
     );
-    if (isDuplicate) {
-      toast({ title: 'Error', description: 'A field with this name already exists.', variant: 'destructive' });
-      return;
-    }
-    if (editingFieldIndex !== null) {
-      const updated = [...tempCustomFields];
-      updated[editingFieldIndex] = { fieldName: newFieldName.trim(), fieldType: newFieldType };
-      setTempCustomFields(updated);
-      setEditingFieldIndex(null);
-    } else {
-      setTempCustomFields((prev) => [...prev, { fieldName: newFieldName.trim(), fieldType: newFieldType }]);
-    }
-    setNewFieldName('');
-    setNewFieldType('text');
   };
 
-  const handleRemoveCustomField = (idx) => {
-    setTempCustomFields((prev) => prev.filter((_, i) => i !== idx));
-    if (editingFieldIndex === idx) { setEditingFieldIndex(null); setNewFieldName(''); setNewFieldType('text'); }
-  };
-
-  const handleSaveSettings = async () => {
-    setIsSavingSettings(true);
-    try {
-      const payload = { candidateSettings: { hiddenFields: tempHiddenFields, customFields: tempCustomFields } };
-      const res = await fetch(`${API_URL}/auth/profile`, {
-        method: 'PUT',
-        headers: getAuthHeader(),
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error('Failed to update settings');
-      const updatedUser = await res.json();
-      const stored = sessionStorage.getItem('currentUser');
-      if (stored) {
-        const obj = JSON.parse(stored);
-        obj.candidateSettings = updatedUser.candidateSettings;
-        sessionStorage.setItem('currentUser', JSON.stringify(obj));
-      }
-      setTenantSettings(updatedUser.candidateSettings || payload.candidateSettings);
-      setIsSettingsOpen(false);
-      toast({ title: 'Saved!', description: 'Candidate form settings updated.' });
-    } catch {
-      toast({ title: 'Error', description: 'Failed to save settings.', variant: 'destructive' });
-    } finally {
-      setIsSavingSettings(false);
-    }
-  };
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // ── RENDER ────────────────────────────────────────────────────────────────
-  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="flex-1 grid grid-cols-1 min-w-0 w-full p-6 pb-48 overflow-y-auto overflow-x-hidden bg-slate-50 dark:bg-slate-950 min-h-screen">
       <div className="w-full max-w-full mx-auto space-y-6">
 
-        {/* ── Header ── */}
+        {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Candidate Database</h1>
             <p className="text-slate-500 mt-1">Manage and track pipeline across all sources</p>
           </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            {isManagerOrAdmin && (
-              <button onClick={handleOpenSettings} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-blue-600 rounded-lg text-sm font-bold hover:bg-slate-50 hover:text-blue-700 transition shadow-sm">
-                <Settings2 className="h-4 w-4" /> Form Settings
-              </button>
-            )}
+          <div className="flex items-center gap-3">
             <button onClick={handleExportExcel} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 hover:text-slate-900 transition shadow-sm">
               <Download className="h-4 w-4" /> Export Excel
-            </button>
-            {/* Import Excel button */}
-            <input ref={importFileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportFileChange} />
-            <button onClick={openImportModal} className="flex items-center gap-2 px-4 py-2 bg-white border border-emerald-400 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 transition shadow-sm">
-              <FileSpreadsheet className="h-4 w-4" /> Import Excel
             </button>
             <button onClick={openAddDialog} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition shadow-sm">
               <Plus className="h-4 w-4" /> Add Candidate
             </button>
+            <button onClick={() => setIsImportDialogOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-green-500 text-green-700 rounded-lg text-sm font-medium hover:bg-green-50 transition shadow-sm">
+              <FileSpreadsheet className="h-4 w-4" /> Import Bulk Candidates
+            </button>
           </div>
         </div>
 
-        {/* ── Stat Cards ── */}
+        {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          <StatCard title="Overall" value={stats.total} colorTheme="overall" active={activeStatFilter === null} onClick={() => { setActiveStatFilter(null); setStatusFilter('all'); }} icon={Users} />
-          <StatCard title="Pipeline" value={stats.pipeline} colorTheme="pipeline" active={activeStatFilter === 'Pipeline'} onClick={() => { setActiveStatFilter('Pipeline'); setStatusFilter('all'); }} icon={GripVertical} />
-          <StatCard title="Selected" value={stats.selected} colorTheme="selected" active={activeStatFilter === 'Selected'} onClick={() => { setActiveStatFilter('Selected'); setStatusFilter('all'); }} icon={CheckCircle2} />
-          <StatCard title="Joined" value={stats.joined} colorTheme="joined" active={activeStatFilter === 'Joined'} onClick={() => { setActiveStatFilter('Joined'); setStatusFilter('all'); }} icon={Check} />
-          <StatCard title="Turnups" value={stats.turnups} colorTheme="turnups" active={activeStatFilter === 'Turnups'} onClick={() => { setActiveStatFilter('Turnups'); setStatusFilter('all'); }} icon={Calendar} />
-          <StatCard title="Shared" value={stats.sharedProfiles} colorTheme="shared" active={activeStatFilter === 'Shared Profiles'} onClick={() => { setActiveStatFilter('Shared Profiles'); setStatusFilter('all'); }} icon={FileText} />
-          <StatCard title="Yet to Attend" value={stats.yetToAttend} colorTheme="yetToAttend" active={activeStatFilter === 'Yet to attend'} onClick={() => { setActiveStatFilter('Yet to attend'); setStatusFilter('all'); }} icon={Clock} />
-          <StatCard title="Hold" value={stats.hold} colorTheme="hold" active={activeStatFilter === 'Hold'} onClick={() => { setActiveStatFilter('Hold'); setStatusFilter('all'); }} icon={Ban} />
-          <StatCard title="Rejected" value={stats.rejected} colorTheme="rejected" active={activeStatFilter === 'Rejected'} onClick={() => { setActiveStatFilter('Rejected'); setStatusFilter('all'); }} icon={Trash2} />
-          <StatCard title="No Show" value={stats.noShow} colorTheme="noshow" active={activeStatFilter === 'No Show'} onClick={() => { setActiveStatFilter('No Show'); setStatusFilter('all'); }} icon={X} />
-          <StatCard title="Backout" value={stats.backout} colorTheme="backout" active={activeStatFilter === 'Backout'} onClick={() => { setActiveStatFilter('Backout'); setStatusFilter('all'); }} icon={ArrowDown} />
-          <StatCard title="Today" value={stats.todaySubmissions} colorTheme="today" active={false} onClick={() => setIsTodaySubOpen(true)} icon={Sparkles} />
+          <StatCard title="Overall Candidates" value={stats.total} colorTheme="overall" hasDot={true} active={activeStatFilter === null} onClick={() => { setActiveStatFilter(null); setStatusFilter('all'); }} />
+          <StatCard title="Turnups" value={stats.turnups} colorTheme="turnups" active={activeStatFilter === 'Turnups'} onClick={() => { setActiveStatFilter('Turnups'); setStatusFilter('all'); }} />
+          <StatCard title="No Show" value={stats.noShow} colorTheme="noshow" active={activeStatFilter === 'No Show'} onClick={() => { setActiveStatFilter('No Show'); setStatusFilter('all'); }} />
+          <StatCard title="Yet to attend" value={stats.yetToAttend} colorTheme="yetToAttend" active={activeStatFilter === 'Yet to attend'} onClick={() => { setActiveStatFilter('Yet to attend'); setStatusFilter('all'); }} />
+          <StatCard title="Selected" value={stats.selected} colorTheme="selected" active={activeStatFilter === 'Selected'} onClick={() => { setActiveStatFilter('Selected'); setStatusFilter('all'); }} />
+          <StatCard title="Rejected" value={stats.rejected} colorTheme="rejected" active={activeStatFilter === 'Rejected'} onClick={() => { setActiveStatFilter('Rejected'); setStatusFilter('all'); }} />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mt-2">
+          <StatCard title="Hold" value={stats.hold} colorTheme="hold" active={activeStatFilter === 'Hold'} onClick={() => { setActiveStatFilter('Hold'); setStatusFilter('all'); }} />
+          <StatCard title="Pipeline" value={stats.pipeline} colorTheme="pipeline" active={activeStatFilter === 'Pipeline'} onClick={() => { setActiveStatFilter('Pipeline'); setStatusFilter('all'); }} />
+          <StatCard title="Joined" value={stats.joined} colorTheme="joined" active={activeStatFilter === 'Joined'} onClick={() => { setActiveStatFilter('Joined'); setStatusFilter('all'); }} />
+          <StatCard title="Backout" value={stats.backout} colorTheme="backout" active={activeStatFilter === 'Backout'} onClick={() => { setActiveStatFilter('Backout'); setStatusFilter('all'); }} />
+          <StatCard title="Shared Profiles" value={stats.sharedProfiles} colorTheme="shared" active={activeStatFilter === 'Shared Profiles'} onClick={() => { setActiveStatFilter('Shared Profiles'); setStatusFilter('all'); }} />
+          <StatCard title="Today Submissions" value={stats.todaySubmissions} colorTheme="today" active={false} onClick={() => setIsTodaySubOpen(true)} />
         </div>
 
-        {/* ── Filters ── */}
-        <div className="p-4 border border-slate-200 dark:border-slate-800 rounded-xl bg-white shadow-sm flex flex-col xl:flex-row gap-4 justify-between">
-          <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto flex-1">
-            <div className="relative w-full sm:max-w-md">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search name, email, ID…" className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div className="relative w-full sm:max-w-sm">
-              <Briefcase className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <input value={roleSearchTerm} onChange={(e) => setRoleSearchTerm(e.target.value)} placeholder="Search by role or skills e.g. React, SQL, Java" className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
+        {/* Filters */}
+        <div className="p-4 border border-slate-200 dark:border-slate-800 rounded-xl bg-white shadow-sm flex flex-col md:flex-row gap-4 justify-between">
+          <div className="w-full md:max-w-2xl">
+            <CandidateKeywordSearch
+              input={searchInput}
+              keywords={searchKeywords}
+              onInputChange={setSearchInput}
+              onKeywordsChange={setSearchKeywords}
+            />
           </div>
           <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full md:w-auto">
             <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
@@ -1439,196 +1748,290 @@ export default function AdminCandidates() {
           </div>
         </div>
 
-        {/* ── Bulk Action Bar ── */}
+        {/* Bulk Action Bar */}
         {selectedIds.length > 0 && (
-          <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-4 flex-wrap">
-            <span className="text-sm font-semibold text-blue-800 bg-blue-100 px-3 py-1 rounded-full">{selectedIds.length} Selected</span>
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-4 flex-wrap animate-in fade-in slide-in-from-top-2">
+            <span className="text-sm font-semibold text-blue-800 bg-blue-100 px-3 py-1 rounded-full">
+              {selectedIds.length} Selected
+            </span>
+            <button
+              onClick={() => setIsJobInviteOpen(true)}
+              className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
+            >
+              <Mail className="h-4 w-4" />
+              Send Job Invite ({selectedIds.length})
+            </button>
             <div className="flex items-center gap-2">
               <Users className="h-4 w-4 text-blue-600" />
-              <select value={bulkRecruiterId} onChange={(e) => setBulkRecruiterId(e.target.value)} className="border border-blue-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none min-w-[200px]">
-                <option value="">Assign to User…</option>
-                {recruiters.map((r) => <option key={r._id || r.id} value={r._id || r.id}>{getRecruiterLabel(r)}</option>)}
+              <select
+                value={bulkRecruiterId}
+                onChange={(e) => setBulkRecruiterId(e.target.value)}
+                className="border border-blue-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none min-w-[200px]"
+              >
+                <option value="">Assign to User...</option>
+                {recruiters.map((r) => (
+                  <option key={r._id || r.id} value={r._id || r.id}>
+                    {getRecruiterLabel(r)}
+                  </option>
+                ))}
               </select>
-              <button onClick={handleBulkAssign} disabled={!bulkRecruiterId || isBulkAssigning} className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">
-                {isBulkAssigning && <Loader2 className="h-3 w-3 animate-spin" />} Assign Candidates
+              <button
+                onClick={handleBulkAssign}
+                disabled={!bulkRecruiterId || isBulkAssigning}
+                className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
+              >
+                {isBulkAssigning && <Loader2 className="h-3 w-3 animate-spin" />}
+                Assign Candidates
               </button>
             </div>
-            <button onClick={() => setSelectedIds([])} className="ml-auto text-sm text-slate-500 hover:text-slate-800 font-medium px-2 py-1">Clear Selection</button>
+            {selectedInvalidEmailCount > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800">
+                {selectedInvalidEmailCount} selected candidate(s) will be skipped because email is unavailable.
+              </div>
+            )}
+            <button
+              onClick={() => setSelectedIds([])}
+              className="ml-auto text-sm text-slate-500 hover:text-slate-800 font-medium px-2 py-1"
+            >
+              Clear Selection
+            </button>
           </div>
         )}
 
-        {/* ── Table ── */}
-        <style>{`.tbl-scroll::-webkit-scrollbar{height:10px}.tbl-scroll::-webkit-scrollbar-track{background:#e2e8f0;border-radius:10px}.tbl-scroll::-webkit-scrollbar-thumb{background:#475569;border-radius:10px;border:2px solid #e2e8f0}.tbl-scroll::-webkit-scrollbar-thumb:hover{background:#1e293b}.tbl-scroll{scrollbar-width:thin;scrollbar-color:#475569 #e2e8f0}`}</style>
+        <style>{`
+          .tbl-scroll::-webkit-scrollbar { height: 10px; }
+          .tbl-scroll::-webkit-scrollbar-track { background: #e2e8f0; border-radius: 10px; }
+          .tbl-scroll::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; border: 2px solid #e2e8f0; }
+          .tbl-scroll::-webkit-scrollbar-thumb:hover { background: #1e293b; }
+          .tbl-scroll { scrollbar-width: thin; scrollbar-color: #475569 #e2e8f0; }
+        `}</style>
+
         <div className="w-full overflow-hidden border border-slate-200 rounded-xl shadow-sm bg-white flex flex-col">
           {loading ? (
             <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>
           ) : (
             <>
-              <div className="w-full overflow-x-auto">
-                <table className="w-full text-sm text-left border-collapse">
+              {/* TOP SCROLLBAR */}
+              <div
+                ref={topScrollRef}
+                onScroll={handleTopScroll}
+                className="tbl-scroll rounded-t-xl bg-slate-100 border-b border-slate-200 w-full"
+                style={{ overflowX: 'auto', overflowY: 'hidden', height: '18px' }}
+              >
+                <div style={{ width: '1700px', height: '1px' }}></div>
+              </div>
+
+              {/* TABLE CONTAINER */}
+              <div ref={bottomScrollRef} onScroll={handleBottomScroll} className="tbl-scroll w-full hidden md:block" style={{ overflowX: 'auto' }}>
+                <table className="w-full text-sm text-left border-collapse min-w-[1700px]">
                   <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                     <tr>
-                      <th className="px-4 py-3 w-12 text-center">
-                        <input type="checkbox" checked={selectedIds.length === filteredCandidates.length && filteredCandidates.length > 0} onChange={handleSelectAll} className="rounded border-slate-300 text-blue-600 h-4 w-4 cursor-pointer" />
+                      <th className="px-4 py-3 w-12 text-center whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={allVisibleCandidatesSelected}
+                          onChange={handleSelectAll}
+                          title="Select all visible candidates"
+                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4 cursor-pointer"
+                        />
                       </th>
                       <th className="px-4 py-3 cursor-pointer whitespace-nowrap" onClick={() => handleSort('candidateId')}>ID <SortIcon field="candidateId" /></th>
+                      <th className="px-4 py-3 whitespace-nowrap">Matching Jobs</th>
                       <th className="px-4 py-3 cursor-pointer whitespace-nowrap" onClick={() => handleSort('name')}>Candidate Name <SortIcon field="name" /></th>
                       <th className="px-4 py-3 whitespace-nowrap text-blue-600 font-bold">Recruiter</th>
                       <th className="px-4 py-3 whitespace-nowrap">Client</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Skills</th>
                       <th className="px-4 py-3 whitespace-nowrap">Date Added</th>
-                      {!isHidden('totalExperience') && <th className="px-4 py-3 whitespace-nowrap">Experience</th>}
-                      {!isHidden('ctc') && <th className="px-4 py-3 whitespace-nowrap">CTC / ECTC</th>}
+                      <th className="px-4 py-3 whitespace-nowrap">Experience</th>
+                      <th className="px-4 py-3 whitespace-nowrap">CTC / ECTC</th>
                       <th className="px-4 py-3 whitespace-nowrap">Status</th>
-                      <th className="px-4 py-3 whitespace-nowrap">Actions</th>
+                      <th className="px-4 py-3 text-right whitespace-nowrap">Actions</th>
                     </tr>
                   </thead>
-                  {paginatedCandidates.map((c) => {
-                    const statusArr = Array.isArray(c.status) ? c.status : [c.status || 'Submitted'];
-                    const isSelected = selectedIds.includes(c._id);
-                    return (
-                      <tbody
-                        key={c._id}
-                        className="group border-b border-slate-100 last:border-0"
-                      >
-                        <tr
-                          className={`transition-colors ${isSelected ? 'bg-blue-50/50 hover:bg-blue-50' : 'hover:bg-slate-50'}`}
-                        >
-                          <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                            <input type="checkbox" checked={isSelected} onChange={(e) => handleSelectOne(e, c._id)} className="rounded border-slate-300 text-blue-600 h-4 w-4 cursor-pointer" />
+                  <tbody className="divide-y divide-slate-100">
+                    {paginatedCandidates.map((c) => {
+                      const statusArr = getCandidateStatuses(c);
+                      const isSelected = selectedIds.includes(c._id);
+                      return (
+                        <tr key={c._id} className={`transition-colors ${isSelected ? 'bg-blue-50/50 hover:bg-blue-50' : 'hover:bg-slate-50'}`}>
+                          <td className="px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => handleSelectOne(e, c._id)}
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4 cursor-pointer"
+                            />
                           </td>
-                          <td className="px-4 py-3 font-mono text-xs text-blue-600 font-bold cursor-pointer whitespace-nowrap" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(getCandidateId(c)); toast({ title: 'Copied ID' }); }}>
-                            {getCandidateId(c)}
+                          <td className="px-4 py-3 font-mono text-xs text-blue-600 font-bold cursor-pointer whitespace-nowrap" onClick={() => { navigator.clipboard.writeText(getCandidateId(c)); toast({ title: "Copied ID" }); }}>{getCandidateId(c)}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {c.matchingJobsCount > 0 ? (
+                              <button
+                                onClick={() => openMatchingJobsModal(c)}
+                                className="font-semibold text-blue-600 hover:text-blue-800 hover:underline text-sm focus:outline-none flex items-center gap-1.5 px-2 py-1 rounded bg-blue-50/50 hover:bg-blue-50 cursor-pointer"
+                                title="View matching jobs"
+                              >
+                                {c.matchingJobsCount} {c.matchingJobsCount === 1 ? 'Job' : 'Jobs'}
+                              </button>
+                            ) : (
+                              <span className="text-slate-400 text-sm px-2 py-1 select-none">
+                                0 Jobs
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <CandidateProfileLink candidate={c} className="text-slate-900">{c.name}</CandidateProfileLink>
+                            <div className="mt-0.5 text-xs font-medium text-slate-400">{c.position || '-'}</div>
+                          </td>
+                          <td className="px-4 py-3 text-[#283086] font-bold whitespace-nowrap italic">
+                            <RecruiterDetailsTrigger recruiter={getCandidateRecruiterDetails(c, recruiters)} className="text-[#283086] font-bold italic">
+                              {typeof c.recruiterId === 'object' ? getRecruiterName(c.recruiterId) : c.recruiterName || '-'}
+                            </RecruiterDetailsTrigger>
                           </td>
                           <td className="px-4 py-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white font-bold shadow-sm border-2 border-white">
-                                {c.name ? c.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : '?'}
-                              </div>
-                              <div className="flex flex-col">
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); setViewCandidate(c); setIsViewDialogOpen(true); refreshViewingCandidate(c._id); }}
-                                  className="text-left font-bold text-slate-900 group-hover:text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 transition-colors"
-                                  title="View Candidate"
-                                >
-                                  {c.name}
-                                </button>
-                                <span className="text-[10px] text-slate-400 font-medium">{c.position || 'No Role'}</span>
-                              </div>
-                            </div>
+                            <CandidateClientCell candidate={c} onShowMore={setClientPopoverCandidate} />
                           </td>
-                          <td className="px-4 py-3 text-[#283086] font-bold italic">{typeof c.recruiterId === 'object' ? getRecruiterName(c.recruiterId) : c.recruiterName || '-'}</td>
-                          <td className="px-4 py-3 relative">
-                            {c.submissions && c.submissions.length > 0 ? (
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100 whitespace-nowrap overflow-hidden text-ellipsis max-w-[140px]" title={c.submissions[c.submissions.length - 1].clientName}>
-                                  <Building className="h-3 w-3 shrink-0" />
-                                  {c.submissions[c.submissions.length - 1].clientName}
-                                </span>
-                                {c.submissions.length > 1 && (
-                                  <span className="relative">
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setActiveClientPopoverId(activeClientPopoverId === c._id ? null : c._id);
-                                      }}
-                                      className="px-1.5 py-0.5 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-md border border-blue-200 transition whitespace-nowrap cursor-pointer select-none"
-                                    >
-                                      +{c.submissions.length - 1} more
-                                    </button>
-                                    {activeClientPopoverId === c._id && (
-                                      <div
-                                        className="absolute left-0 mt-1 z-[99] min-w-[200px] bg-white border border-slate-200 rounded-xl shadow-xl p-3 flex flex-col gap-1.5"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <div className="text-[9px] font-black text-slate-400 border-b pb-1 uppercase tracking-wider">
-                                          Associated Clients ({c.submissions.length})
-                                        </div>
-                                        <div className="flex flex-col gap-1 max-h-[160px] overflow-y-auto sleek-scrollbar">
-                                          {c.submissions.map((sub, idx) => (
-                                            <div
-                                              key={sub._id}
-                                              className={`text-xs font-semibold py-1 px-1.5 rounded flex items-center justify-between gap-3 ${
-                                                idx === c.submissions.length - 1
-                                                  ? 'bg-blue-50/50 text-blue-700'
-                                                  : 'text-slate-700 hover:bg-slate-50'
-                                              }`}
-                                            >
-                                              <span className="truncate max-w-[110px]" title={sub.clientName}>
-                                                {sub.clientName}
-                                              </span>
-                                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border scale-90 whitespace-nowrap ${getStatusBadgeColor(sub.status)}`}>
-                                                {sub.status}
-                                              </span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-slate-400 font-medium">—</span>
-                            )}
+                          <td className="px-4 py-3 text-xs text-slate-500 max-w-[150px] truncate" title={Array.isArray(c.skills) ? c.skills.join(', ') : c.skills}>
+                            {!c.skills ? 'N/A' : Array.isArray(c.skills) ? c.skills.slice(0, 3).join(', ') + (c.skills.length > 3 ? '...' : '') : c.skills.length > 50 ? c.skills.substring(0, 50) + '...' : c.skills}
                           </td>
                           <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{c.dateAdded ? new Date(c.dateAdded).toLocaleDateString('en-GB') : (c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-GB') : '-')}</td>
-                          {!isHidden('totalExperience') && <td className="px-4 py-3 text-sm whitespace-nowrap">{c.totalExperience ? `${c.totalExperience} ` : '-'}</td>}
-                          {!isHidden('ctc') && <td className="px-4 py-3 text-xs whitespace-nowrap"><div>{c.ctc ? `${c.ctc} LPA` : '-'}</div><div className="text-green-600">{c.ectc ? `${c.ectc} LPA` : '-'}</div></td>}
+                          <td className="px-4 py-3 text-sm whitespace-nowrap">{c.totalExperience ? `${c.totalExperience} Yrs` : '-'}</td>
+                          <td className="px-4 py-3 text-xs whitespace-nowrap"><div>{c.ctc || '-'}</div><div className="text-green-600">{c.ectc || '-'}</div></td>
                           <td className="px-4 py-3">
-                            {c.submissions && c.submissions.length > 0 ? (
-                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap overflow-hidden text-ellipsis ${getStatusBadgeColor(c.submissions[c.submissions.length - 1].status)}`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${getStatusDotColor(c.submissions[c.submissions.length - 1].status)} shrink-0`} />
-                                {c.submissions[c.submissions.length - 1].status}
-                              </span>
-                            ) : (
-                              <span className="text-slate-400 font-medium">—</span>
-                            )}
+                            <div className="flex flex-wrap gap-1.5 min-w-[140px] max-w-[240px]">
+                              {statusArr.map((s) => (
+                                <StatusBadge key={s} status={s} />
+                              ))}
+                            </div>
                           </td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex justify-end items-center gap-1.5">
-                              <button className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-100 hover:border-blue-200 rounded-lg shadow-sm transition-all" title="View Candidate" onClick={(e) => { e.stopPropagation(); setViewCandidate(c); setIsViewDialogOpen(true); refreshViewingCandidate(c._id); }}><Eye className="h-4 w-4" /></button>
-                              <button className="p-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-100 hover:border-indigo-200 rounded-lg shadow-sm transition-all" title="Edit Candidate" onClick={(e) => { e.stopPropagation(); openEditDialog(c); }}><Edit className="h-4 w-4" /></button>
-                              <button className="p-2 bg-red-50 hover:bg-red-100 text-red-500 border border-red-100 hover:border-red-200 rounded-lg shadow-sm transition-all" title="Delete Candidate" onClick={(e) => { e.stopPropagation(); handleDelete(c._id); }}><Trash2 className="h-4 w-4" /></button>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <div className="flex justify-end items-center gap-2">
+                              <Eye className="h-4 w-4 text-blue-600 cursor-pointer" onClick={() => { setViewCandidate(c); setIsViewDialogOpen(true); }} />
+                              <Edit className="h-4 w-4 text-slate-600 cursor-pointer" onClick={() => openEditDialog(c)} />
+                              <Trash2 className="h-4 w-4 text-red-500 cursor-pointer" onClick={() => handleDelete(c._id)} />
                             </div>
                           </td>
                         </tr>
-                      </tbody>
-                    );
-                  })}
+                      );
+                    })}
+                  </tbody>
                 </table>
                 {filteredCandidates.length === 0 && !loading && (
-                  <div className="text-center py-12 text-slate-500">No candidates match your filters.</div>
+                  <div className="text-center py-12 text-slate-500">No candidates match your search filters.</div>
                 )}
               </div>
+
+              {/* Mobile Card List */}
+              <div className="block md:hidden space-y-4 p-4 bg-transparent">
+                {paginatedCandidates.map((c) => {
+                  const statusArr = getCandidateStatuses(c);
+                  const isSelected = selectedIds.includes(c._id);
+                  return (
+                    <div key={c._id} className={`bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3 hover:shadow-md transition-shadow ${isSelected ? 'bg-blue-50/20 border-blue-200' : ''}`}>
+                      <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-2">
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected} 
+                            onChange={(e) => handleSelectOne(e, c._id)} 
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" 
+                          />
+                          <span 
+                            onClick={() => { navigator.clipboard.writeText(getCandidateId(c)); toast({ title: "Copied ID" }); }}
+                            className="font-mono text-xs text-blue-600 font-bold cursor-pointer"
+                          >
+                            {getCandidateId(c)}
+                          </span>
+                          <span className="text-slate-300">•</span>
+                          {c.matchingJobsCount > 0 ? (
+                            <button
+                              onClick={() => openMatchingJobsModal(c)}
+                              className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                              title="View matching jobs"
+                            >
+                              {c.matchingJobsCount} {c.matchingJobsCount === 1 ? 'Job' : 'Jobs'}
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate-400 select-none">
+                              0 Jobs
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button className="p-1 hover:bg-slate-100 rounded text-blue-600" onClick={() => { setViewCandidate(c); setIsViewDialogOpen(true); }}><Eye className="h-4 w-4" /></button>
+                          <button className="p-1 hover:bg-slate-100 rounded text-slate-600" onClick={() => openEditDialog(c)}><Edit className="h-4 w-4 text-slate-600" /></button>
+                          <button className="p-1 hover:bg-slate-100 rounded text-red-600" onClick={() => handleDelete(c._id)}><Trash2 className="h-4 w-4" /></button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <CandidateProfileLink candidate={c} className="font-bold text-slate-900 text-base">{c.name}</CandidateProfileLink>
+                        <div className="text-xs font-medium text-slate-500 mt-0.5">{c.position || 'No Position'}</div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 items-center justify-between">
+                        <div className="text-xs text-slate-500 font-medium">
+                          Recruiter: <RecruiterDetailsTrigger recruiter={getCandidateRecruiterDetails(c, recruiters)} className="text-[#283086] font-bold italic underline">
+                            {typeof c.recruiterId === 'object' ? getRecruiterName(c.recruiterId) : c.recruiterName || '-'}
+                          </RecruiterDetailsTrigger>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {statusArr.map((s) => (
+                            <StatusBadge key={s} status={s} />
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-xs text-slate-600 border-t border-slate-100 pt-2.5">
+                        <div>
+                          <span className="font-semibold text-slate-400 block uppercase tracking-wider text-[9px] mb-0.5">Contact</span>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="truncate">{c.contact}</span>
+                            <button className="text-green-600 hover:text-green-700" onClick={() => handleWhatsApp(c)}>
+                              <MessageCircle className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-slate-400 block uppercase tracking-wider text-[9px] mb-0.5">Experience</span>
+                          <span>{c.totalExperience ? `${c.totalExperience} Yrs` : 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-slate-400 block uppercase tracking-wider text-[9px] mb-0.5">Client</span>
+                          <CandidateClientCell candidate={c} onShowMore={setClientPopoverCandidate} />
+                        </div>
+                        <div>
+                          <span className="font-semibold text-slate-400 block uppercase tracking-wider text-[9px] mb-0.5">CTC / ECTC</span>
+                          <span>{c.ctc || '-'} / <span className="text-green-600 font-medium">{c.ectc || '-'}</span></span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* --- PAGINATION CONTROLS --- */}
               {totalPages > 1 && (
-                <div className="flex flex-col sm:flex-row justify-between items-center p-6 border-t border-slate-100 bg-white gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-slate-500">
-                      Showing <span className="text-slate-900 font-bold">{(currentPage - 1) * ITEMS_PER_PAGE + 1}</span> to <span className="text-slate-900 font-bold">{Math.min(currentPage * ITEMS_PER_PAGE, filteredCandidates.length)}</span> of <span className="text-slate-900 font-bold">{filteredCandidates.length}</span> candidates
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button 
-                      disabled={currentPage === 1} 
-                      onClick={() => setCurrentPage((p) => p - 1)} 
-                      className="inline-flex items-center gap-1.5 px-4 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
+                <div className="flex flex-col sm:flex-row justify-between items-center p-4 border-t border-slate-200 bg-white gap-4">
+                  <span className="text-sm text-slate-500">
+                    Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredCandidates.length)} of {filteredCandidates.length} entries
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(p => p - 1)}
+                      className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
                     >
-                      <ChevronDown className="h-4 w-4 rotate-90" />
                       Previous
                     </button>
-                    
-                    <div className="flex items-center px-4 py-2 bg-blue-50 text-blue-700 border border-blue-100 rounded-xl text-sm font-bold shadow-sm">
-                      Page {currentPage} <span className="mx-1.5 opacity-50 text-blue-300">/</span> {totalPages}
-                    </div>
-
-                    <button 
-                      disabled={currentPage === totalPages} 
-                      onClick={() => setCurrentPage((p) => p + 1)} 
-                      className="inline-flex items-center gap-1.5 px-4 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
+                    <span className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(p => p + 1)}
+                      className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
                     >
                       Next
-                      <ChevronDown className="h-4 w-4 -rotate-90" />
                     </button>
                   </div>
                 </div>
@@ -1638,74 +2041,141 @@ export default function AdminCandidates() {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          ADD / EDIT DIALOG
-      ══════════════════════════════════════════════════════════════════════ */}
-      {isDialogOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+      {clientPopoverCandidate && (
+        <ClientSubmissionsModal
+          candidate={clientPopoverCandidate}
+          jobs={jobs}
+          onClose={() => setClientPopoverCandidate(null)}
+        />
+      )}
 
-            {/* Dialog Header */}
-            <div className="p-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
+      {isDialogOpen && (
+        <ModalPortal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsDialogOpen(false)} />
+          <div className="relative bg-white rounded-xl shadow-2xl max-w-7xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
+            <div className="p-6 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">{isEditMode ? 'Edit Candidate' : 'Add New Candidate'}</h2>
-                <p className="text-sm text-slate-500 mt-0.5">Fill out all the details for the candidate profile.</p>
+                <p className="text-sm text-slate-500 mt-0.5">Fill out all the details required for the candidate profile.</p>
               </div>
-              <button onClick={() => setIsDialogOpen(false)} className="text-slate-400 hover:text-slate-600 font-bold text-2xl leading-none px-2">×</button>
+              <div className="flex items-center gap-2">
+                {!isEditMode && (
+                  <button onClick={() => setCandidateFormControlOpen(true)} className="inline-flex items-center gap-2 px-3 py-2 border border-slate-300 bg-white rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 transition">
+                    <SlidersHorizontal className="h-4 w-4" /> Form Control
+                  </button>
+                )}
+                <button onClick={() => setIsDialogOpen(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xl px-2">×</button>
+              </div>
             </div>
 
-            {/* Dialog Body */}
-            <div className="p-6 overflow-y-auto flex-1 space-y-8">
-
-              {/* Resume Success Banner */}
+            <div className="p-6 overflow-y-auto flex-1 space-y-6 bg-slate-100/60 pb-48">
               {resumeSuccess.show && (
-                <div style={{ background: 'linear-gradient(to right,#f0fdf4,#ecfdf5,#f0fdf4)', border: '1.5px solid #86efac', borderRadius: '12px', boxShadow: '0 4px 24px rgba(34,197,94,.13)', overflow: 'hidden' }}>
+                <div style={{
+                  background: 'linear-gradient(to right, #f0fdf4, #ecfdf5, #f0fdf4)',
+                  border: '1.5px solid #86efac',
+                  borderRadius: '12px',
+                  boxShadow: '0 4px 24px rgba(34,197,94,0.13)',
+                  overflow: 'hidden',
+                  animation: 'resumeSlideIn 0.35s cubic-bezier(0.16,1,0.3,1)'
+                }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px' }}>
-                    <div style={{ flexShrink: 0, width: '40px', height: '40px', borderRadius: '50%', background: '#dcfce7', border: '2px solid #86efac', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{
+                      flexShrink: 0, width: '40px', height: '40px', borderRadius: '50%',
+                      background: '#dcfce7', border: '2px solid #86efac',
+                      display: 'flex', alignItems: 'center', justifycontent: 'center'
+                    }}>
                       <CheckCircle2 style={{ width: '20px', height: '20px', color: '#16a34a' }} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
                         <Sparkles style={{ width: '14px', height: '14px', color: '#22c55e' }} />
-                        <p style={{ fontSize: '14px', fontWeight: 700, color: '#14532d', margin: 0 }}>Resume Extracted Successfully!</p>
+                        <p style={{ fontSize: '14px', fontWeight: 700, color: '#14532d', margin: 0 }}>
+                          Resume Extracted Successfully!
+                        </p>
                       </div>
                       <p style={{ fontSize: '12px', color: '#15803d', margin: '3px 0 0 0', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <FileText style={{ width: '12px', height: '12px' }} />
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>{resumeSuccess.fileName}</span>
+                        <FileText style={{ width: '12px', height: '12px', flexShrink: 0 }} />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                          {resumeSuccess.fileName}
+                        </span>
                       </p>
-                      {resumeSuccess.fieldsCount > 0 && <p style={{ fontSize: '12px', color: '#16a34a', margin: '5px 0 0 0' }}>✓ {resumeSuccess.fieldsCount} field{resumeSuccess.fieldsCount !== 1 ? 's' : ''} auto-filled — review and complete missing details.</p>}
+                      {resumeSuccess.fieldsCount > 0 && (
+                        <p style={{ fontSize: '12px', color: '#16a34a', margin: '5px 0 0 0' }}>
+                          ✓ {resumeSuccess.fieldsCount} field{resumeSuccess.fieldsCount !== 1 ? 's' : ''} auto-filled — please review and complete any missing details.
+                        </p>
+                      )}
                     </div>
-                    <button onClick={() => setResumeSuccess((s) => ({ ...s, show: false }))} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: '6px', color: '#4ade80', lineHeight: 1 }}>
+                    <button
+                      onClick={() => setResumeSuccess(s => ({ ...s, show: false }))}
+                      style={{
+                        flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer',
+                        padding: '4px', borderRadius: '6px', color: '#4ade80', lineHeight: 1
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#bbf7d0'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
                       <X style={{ width: '16px', height: '16px' }} />
                     </button>
+                  </div>
+                  <div style={{ height: '3px', background: '#bbf7d0' }}>
+                    <div style={{
+                      height: '100%', background: '#22c55e',
+                      animation: 'resumeBarShrink 5s linear forwards'
+                    }} />
                   </div>
                 </div>
               )}
 
-              {/* ── Upload Resume ── */}
+              <style>{`
+                @keyframes resumeSlideIn {
+                  from { opacity: 0; transform: translateY(-12px); }
+                  to   { opacity: 1; transform: translateY(0); }
+                }
+                @keyframes resumeBarShrink {
+                  from { width: 100%; }
+                  to   { width: 0%; }
+                }
+              `}</style>
+
               {!isEditMode && (
-                <section>
+                <section className="rounded-xl border border-blue-100 bg-white p-5 shadow-sm">
                   <h3 className="text-base font-semibold text-blue-700 border-b border-blue-100 pb-2 mb-4">Upload Resume (Auto Fill)</h3>
                   <div className="border-2 border-dashed border-blue-200 rounded-xl p-6 flex flex-col items-center justify-center bg-blue-50/50 hover:bg-blue-50 transition-colors">
                     {isParsingResume ? (
                       <div className="flex flex-col items-center">
                         <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-2" />
-                        <p className="text-sm text-blue-800 font-medium">Parsing resume details…</p>
+                        <p className="text-sm text-blue-800 font-medium">Parsing resume details...</p>
                       </div>
                     ) : (
                       <>
-                        <div className="bg-white p-3 rounded-full mb-3 shadow-sm border border-blue-100"><Plus className="h-6 w-6 text-blue-600" /></div>
-                        <p className="text-sm text-slate-600 mb-4 text-center">Upload a CV to automatically fill candidate details.<br /><span className="text-xs text-slate-400">Supported: PDF, DOC, DOCX (Max 5MB)</span></p>
-                        <input type="file" id="resume-upload" className="hidden" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleResumeUpload} />
-                        <label htmlFor="resume-upload" className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 cursor-pointer transition shadow-sm">Browse Files</label>
+                        <div className="bg-white p-3 rounded-full mb-3 shadow-sm border border-blue-100">
+                          <Plus className="h-6 w-6 text-blue-600" />
+                        </div>
+                        <p className="text-sm text-slate-600 mb-4 text-center">
+                          Upload a CV to automatically fill candidate details.<br />
+                          <span className="text-xs text-slate-400">Supported: PDF, DOC, DOCX (Max 5MB)</span>
+                        </p>
+                        <input
+                          type="file"
+                          id="resume-upload"
+                          className="hidden"
+                          accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                          onChange={handleResumeUpload}
+                        />
+                        <label
+                          htmlFor="resume-upload"
+                          className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 cursor-pointer transition shadow-sm"
+                        >
+                          Browse Files
+                        </label>
                       </>
                     )}
                   </div>
                 </section>
               )}
 
-              {/* ── Personal Information ── */}
-              <section>
+              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                 <h3 className="text-base font-semibold text-blue-700 border-b border-blue-100 pb-2 mb-4">Personal Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -1721,353 +2191,216 @@ export default function AdminCandidates() {
                   <div>
                     <label className="block text-sm font-medium mb-1 text-slate-700">Contact Number *</label>
                     <div className="relative">
-                      <input type="text" value={formData.contact} onChange={(e) => handleInputChange('contact', e.target.value)} onBlur={(e) => checkPhoneDuplicate(e.target.value)} className={inputCls(errors.contact)} maxLength={10} placeholder="10-digit number" />
-                      {isCheckingPhone && <span className="absolute right-3 top-2.5 text-xs text-slate-400 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Checking…</span>}
+                      <input
+                        type="text"
+                        value={formData.contact}
+                        onChange={(e) => handleInputChange('contact', e.target.value)}
+                        onBlur={(e) => checkPhoneDuplicate(e.target.value)}
+                        className={inputCls(errors.contact)}
+                      />
+                      {isCheckingPhone && (
+                        <span className="absolute right-3 top-2.5 text-xs text-slate-400 flex items-center gap-1">
+                          <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                        </span>
+                      )}
                     </div>
                     {errors.contact && <p className="text-xs text-red-500 mt-1">{errors.contact}</p>}
                   </div>
-                  {!isHidden('alternateNumber') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Alternate Number</label>
-                      <input type="text" value={formData.alternateNumber} onChange={(e) => handleInputChange('alternateNumber', e.target.value)} className={inputCls(false)} placeholder="e.g. 9876543210" maxLength={10} />
-                    </div>
-                  )}
+                  {isCandidateFieldVisible('alternateNumber') && <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Alternate Number</label>
+                    <input type="text" value={formData.alternateNumber} onChange={(e) => handleInputChange('alternateNumber', e.target.value)} className={inputCls(errors.alternateNumber)} placeholder="e.g. 9876543210" />
+                    {errors.alternateNumber && <p className="text-xs text-red-500 mt-1">{errors.alternateNumber}</p>}
+                  </div>}
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium mb-1 text-slate-700">Email Address *</label>
                     <div className="relative">
-                      <input type="email" value={formData.email} onChange={(e) => handleInputChange('email', e.target.value)} onBlur={(e) => checkEmailDuplicate(e.target.value)} className={inputCls(errors.email)} />
-                      {isCheckingEmail && <span className="absolute right-3 top-2.5 text-xs text-slate-400 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Checking…</span>}
+                      <input
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) => handleInputChange('email', e.target.value)}
+                        onBlur={(e) => checkEmailDuplicate(e.target.value)}
+                        className={inputCls(errors.email)}
+                      />
+                      {isCheckingEmail && (
+                        <span className="absolute right-3 top-2.5 text-xs text-slate-400 flex items-center gap-1">
+                          <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                        </span>
+                      )}
                     </div>
                     {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
                   </div>
-                  {!isHidden('currentLocation') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Current Location</label>
-                      <input type="text" value={formData.currentLocation} onChange={(e) => handleInputChange('currentLocation', e.target.value)} className={inputCls(false)} />
-                    </div>
-                  )}
-                  {!isHidden('preferredLocation') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Preferred Location</label>
-                      <input type="text" value={formData.preferredLocation} onChange={(e) => handleInputChange('preferredLocation', e.target.value)} className={inputCls(false)} />
-                    </div>
-                  )}
-                  {!isHidden('dateOfBirth') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Date of Birth</label>
-                      <input type="date" value={formData.dateOfBirth} onChange={(e) => handleInputChange('dateOfBirth', e.target.value)} max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0]} className={inputCls(errors.dateOfBirth)} />
-                      {errors.dateOfBirth && <p className="text-xs text-red-500 mt-1">{errors.dateOfBirth}</p>}
-                    </div>
-                  )}
-                  <div>
+                  {isCandidateFieldVisible('currentLocation') && <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Current Location</label>
+                    <input type="text" value={formData.currentLocation} onChange={(e) => handleInputChange('currentLocation', e.target.value)} className={inputCls(false)} />
+                  </div>}
+                  {isCandidateFieldVisible('preferredLocation') && <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Preferred Location</label>
+                    <input type="text" value={formData.preferredLocation} onChange={(e) => handleInputChange('preferredLocation', e.target.value)} className={inputCls(false)} />
+                  </div>}
+                  {isCandidateFieldVisible('dateOfBirth') && <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Date of Birth</label>
+                    <input
+                      type="date"
+                      value={formData.dateOfBirth}
+                      onChange={(e) => handleInputChange('dateOfBirth', e.target.value)}
+                      max={new Date(new Date().setDate(new Date().getDate() - 1)).toISOString().split('T')[0]}
+                      className={inputCls(errors.dateOfBirth)}
+                    />
+                    {errors.dateOfBirth && <p className="text-xs text-red-500 mt-1">{errors.dateOfBirth}</p>}
+                  </div>}
+                  {isCandidateFieldVisible('dateAdded') && <div>
                     <label className="block text-sm font-medium mb-1 text-slate-700">Date Added</label>
-                    <input type="date" value={formData.dateAdded} onChange={(e) => handleInputChange('dateAdded', e.target.value)} max={todayStr} className={inputCls(errors.dateAdded)} />
+                    <input
+                      type="date"
+                      value={formData.dateAdded}
+                      onChange={(e) => handleInputChange('dateAdded', e.target.value)}
+                      max={todayStr}
+                      className={inputCls(errors.dateAdded)}
+                    />
                     <p className="text-xs text-slate-400 mt-1">Cannot be a future date. Defaults to today.</p>
                     {errors.dateAdded && <p className="text-xs text-red-500 mt-1">{errors.dateAdded}</p>}
-                  </div>
-                  {!isHidden('gender') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Gender</label>
-                      <select value={formData.gender} onChange={(e) => handleInputChange('gender', e.target.value)} className={inputCls(false)}>
-                        <option value="">Select Gender</option>
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Other">Other</option>
-                        <option value="Not Specified">Not Specified</option>
-                      </select>
-                    </div>
-                  )}
-                  {!isHidden('linkedin') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">LinkedIn URL</label>
-                      <input type="text" value={formData.linkedin} onChange={(e) => handleInputChange('linkedin', e.target.value)} className={inputCls(errors.linkedin)} placeholder="https://linkedin.com/in/..." />
-                      {errors.linkedin && <p className="text-xs text-red-500 mt-1">{errors.linkedin}</p>}
-                    </div>
-                  )}
+                  </div>}
                 </div>
               </section>
 
-              {/* ── Professional Details ── */}
-              <section>
+              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                 <h3 className="text-base font-semibold text-blue-700 border-b border-blue-100 pb-2 mb-4">Professional Details</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium mb-1 text-slate-700">Role (Position) *</label>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Current Role *</label>
                     <input
                       type="text"
                       value={formData.position}
                       onChange={(e) => handleInputChange('position', e.target.value)}
                       className={inputCls(errors.position)}
-                      placeholder="e.g. Frontend Developer"
+                      placeholder="e.g. React Developer"
                     />
                     {errors.position && <p className="text-xs text-red-500 mt-1">{errors.position}</p>}
                   </div>
-
-                  {!isHidden('currentCompany') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Current Company</label>
-                      <input type="text" value={formData.currentCompany} onChange={(e) => handleInputChange('currentCompany', e.target.value)} className={inputCls(false)} />
-                    </div>
-                  )}
-                  {!isHidden('industry') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Industry</label>
-                      <input type="text" value={formData.industry} onChange={(e) => handleInputChange('industry', e.target.value)} className={inputCls(false)} />
-                    </div>
-                  )}
-                  {!isHidden('reasonForChange') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Reason for Change</label>
-                      <input type="text" value={formData.reasonForChange} onChange={(e) => handleInputChange('reasonForChange', e.target.value)} className={inputCls(false)} />
-                    </div>
-                  )}
-                  {!isHidden('totalExperience') && (
-                    <div className="space-y-1">
-                      <label className="block text-sm font-medium text-slate-700">Total Experience *</label>
-                      <div className="flex gap-2">
-                        <div className="flex-1">
-                          <select value={formData.totalExperienceYears} onChange={(e) => handleInputChange('totalExperienceYears', e.target.value)} className={inputCls(errors.totalExperience)}>
-                            {Array.from({ length: 16 }, (_, i) => <option key={i} value={i}>{i} Years</option>)}
-                          </select>
-                        </div>
-                        <div className="flex-1">
-                          <select value={formData.totalExperienceMonths} onChange={(e) => handleInputChange('totalExperienceMonths', e.target.value)} className={inputCls(errors.totalExperience)}>
-                            {Array.from({ length: 13 }, (_, i) => <option key={i} value={i}>{i} Months</option>)}
-                          </select>
-                        </div>
-                      </div>
-                      {errors.totalExperience && <p className="text-xs text-red-500 mt-1">{errors.totalExperience}</p>}
-                    </div>
-                  )}
-                  {!isHidden('relevantExperience') && (
-                    <div className="space-y-1">
-                      <label className="block text-sm font-medium text-slate-700">Relevant Experience</label>
-                      <div className="flex gap-2">
-                        <div className="flex-1">
-                          <select value={formData.relevantExperienceYears} onChange={(e) => handleInputChange('relevantExperienceYears', e.target.value)} className={inputCls(false)}>
-                            {Array.from({ length: 16 }, (_, i) => <option key={i} value={i}>{i} Years</option>)}
-                          </select>
-                        </div>
-                        <div className="flex-1">
-                          <select value={formData.relevantExperienceMonths} onChange={(e) => handleInputChange('relevantExperienceMonths', e.target.value)} className={inputCls(errors.relevantExperience)}>
-                            {Array.from({ length: 13 }, (_, i) => <option key={i} value={i}>{i} Months</option>)}
-                          </select>
-                        </div>
-                      </div>
-                      {errors.relevantExperience && <p className="text-xs text-red-500 mt-1">{errors.relevantExperience}</p>}
-                    </div>
-                  )}
-                  {!isHidden('education') && (
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Educational Qualification</label>
-                      <input type="text" value={formData.education} onChange={(e) => handleInputChange('education', e.target.value)} className={inputCls(false)} placeholder="e.g. B.Tech, MBA..." />
-                    </div>
-                  )}
-                  <div className="md:col-span-2">
+                  {isCandidateFieldVisible('currentCompany') && <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Current Company</label>
+                    <input type="text" value={formData.currentCompany} onChange={(e) => handleInputChange('currentCompany', e.target.value)} className={inputCls(false)} />
+                  </div>}
+                  {isCandidateFieldVisible('reasonForChange') && <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Reason for Change</label>
+                    <input type="text" value={formData.reasonForChange} onChange={(e) => handleInputChange('reasonForChange', e.target.value)} className={inputCls(false)} />
+                  </div>}
+                  {isCandidateFieldVisible('totalExperience') && <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Total Experience (Years)</label>
+                    <input type="text" value={formData.totalExperience} onChange={(e) => handleInputChange('totalExperience', e.target.value)} className={inputCls(errors.totalExperience)} placeholder="e.g. 5" />
+                    {errors.totalExperience && <p className="text-xs text-red-500 mt-1">{errors.totalExperience}</p>}
+                  </div>}
+                  {isCandidateFieldVisible('relevantExperience') && <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Relevant Experience (Years)</label>
+                    <input type="text" value={formData.relevantExperience} onChange={(e) => handleInputChange('relevantExperience', e.target.value)} className={inputCls(errors.relevantExperience)} placeholder="e.g. 3" />
+                    {errors.relevantExperience && <p className="text-xs text-red-500 mt-1">{errors.relevantExperience}</p>}
+                  </div>}
+                  {isCandidateFieldVisible('skills') && <div className="md:col-span-2">
                     <label className="block text-sm font-medium mb-1 text-slate-700">Skills *</label>
-                    <div className={`flex flex-wrap gap-2 p-2 border rounded-lg ${errors.skills ? 'border-red-500' : 'border-slate-200'} bg-white focus-within:ring-2 focus-within:ring-blue-500`}>
-                      {formData.skills && formData.skills.split(',').map(s => s.trim()).filter(Boolean).map((skill, idx) => (
-                        <span key={idx} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                          {skill}
-                          <button type="button" onClick={() => {
-                            const newSkills = formData.skills.split(',').map(s => s.trim()).filter(Boolean).filter((_, i) => i !== idx);
-                            handleInputChange('skills', newSkills.join(', '));
-                          }} className="hover:text-blue-900 rounded-full p-0.5 hover:bg-blue-100 transition-colors">
-                            <X className="h-3 w-3" />
-                          </button>
-                        </span>
-                      ))}
-                      <input 
-                        type="text" 
-                        className="flex-1 outline-none min-w-[120px] text-sm bg-transparent"
-                        placeholder={formData.skills ? "Add more..." : "e.g. React, Node (Press Enter)"}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ',') {
-                            e.preventDefault();
-                            const val = e.target.value.trim().replace(/,/g, '');
-                            if (val) {
-                              const currentSkills = formData.skills ? formData.skills.split(',').map(s => s.trim()).filter(Boolean) : [];
-                              if (!currentSkills.includes(val)) {
-                                currentSkills.push(val);
-                                handleInputChange('skills', currentSkills.join(', '));
-                              }
-                            }
-                            e.target.value = '';
-                          } else if (e.key === 'Backspace' && !e.target.value && formData.skills) {
-                            const currentSkills = formData.skills.split(',').map(s => s.trim()).filter(Boolean);
-                            currentSkills.pop();
-                            handleInputChange('skills', currentSkills.join(', '));
-                          }
-                        }}
-                        onBlur={(e) => {
-                          const val = e.target.value.trim().replace(/,/g, '');
-                          if (val) {
-                            const currentSkills = formData.skills ? formData.skills.split(',').map(s => s.trim()).filter(Boolean) : [];
-                            if (!currentSkills.includes(val)) {
-                              currentSkills.push(val);
-                              handleInputChange('skills', currentSkills.join(', '));
-                            }
-                            e.target.value = '';
-                          }
-                        }}
-                      />
-                    </div>
+                    <SkillsBadgeInput value={formData.skills} onChange={(skills) => handleInputChange('skills', skills)} error={errors.skills} />
                     {errors.skills && <p className="text-xs text-red-500 mt-1">{errors.skills}</p>}
-                  </div>
-
-                  <div className="md:col-span-2 mt-2 bg-blue-50/40 p-4 rounded-lg border border-blue-100">
-                    <h4 className="font-semibold text-slate-800 text-sm mb-3 flex items-center gap-2">
-                      <Building className="h-4 w-4 text-blue-500" /> Deliver Candidate to Client
-                    </h4>
-                    {isEditMode && viewingCandidate ? (
-                      <div className="flex flex-col sm:flex-row gap-3 items-end">
-                        <div className="flex-1 min-w-[200px] space-y-1">
-                          <label className="text-xs">Client *</label>
-                          <select 
-                            id="deliver-client-select" 
-                            required 
-                            value={selectedDeliverClientId}
-                            onChange={(e) => setSelectedDeliverClientId(e.target.value)}
-                            className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="">Select Client</option>
-                            {clients.map(cl => (
-                              <option key={cl._id} value={cl._id}>{cl.companyName}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="flex-1 min-w-[200px] space-y-1">
-                          <label className="text-xs">Associated Job *</label>
-                          <select 
-                            id="deliver-job-select" 
-                            required
-                            className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="">{selectedDeliverClientId ? 'Select a Job' : 'Select a client first'}</option>
-                            {filteredJobs.map(j => (
-                              <option key={j._id} value={j._id}>{j.position} ({j.jobCode}) - {j.clientName}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <button 
-                          type="button" 
-                          onClick={() => {
-                            const clientIdSelect = document.getElementById('deliver-client-select');
-                            const jobIdSelect = document.getElementById('deliver-job-select');
-                            if (clientIdSelect && clientIdSelect.value && jobIdSelect && jobIdSelect.value) {
-                              handleDeliverToClient(clientIdSelect.value, jobIdSelect.value);
-                              setSelectedDeliverClientId('');
-                              jobIdSelect.value = '';
-                            } else {
-                              toast({ title: 'Error', description: 'Please select both client and associated job', variant: 'destructive' });
-                            }
-                          }}
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg text-sm transition shrink-0"
-                        >
-                          Deliver Profile
-                        </button>
-                      </div>
-                    ) : (
-                      <div>
-                        <p className="text-xs text-slate-500 mb-3">Select an initial client and role to deliver this candidate to upon creation.</p>
-                        <div className="flex flex-col sm:flex-row gap-3 items-end">
-                          <div className="flex-1 min-w-[200px] space-y-1">
-                            <label className="text-xs">Client (Optional)</label>
-                            <select 
-                              id="deliver-client-select" 
-                              value={selectedDeliverClientId}
-                              onChange={(e) => setSelectedDeliverClientId(e.target.value)}
-                              className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                              <option value="">Select Client</option>
-                              {clients.map(cl => (
-                                <option key={cl._id} value={cl._id}>{cl.companyName}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="flex-1 min-w-[200px] space-y-1">
-                            <label className="text-xs">Associated Job (Optional)</label>
-                            <select 
-                              id="deliver-job-select" 
-                              className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                              <option value="">{selectedDeliverClientId ? 'No Associated Job' : 'Select a client first'}</option>
-                              {filteredJobs.map(j => (
-                                <option key={j._id} value={j._id}>{j.position} ({j.jobCode}) - {j.clientName}</option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
+                  </div>}
+                  <div className="md:col-span-2 rounded-xl border border-blue-200 bg-blue-50/40 p-5">
+                    <ClientJobSubmissions
+                      submissions={formData.submissions || []}
+                      clients={clients}
+                      jobs={jobs}
+                      onChange={(rows) => handleInputChange('submissions', rows)}
+                      errors={errors}
+                      isEditMode={isEditMode}
+                      onDeleteExisting={handleDeleteSubmission}
+                    />
+                    {isLoadingSubmissions && (
+                      <div className="flex items-center gap-2 mt-3 text-xs text-slate-500">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Loading existing submissions...
                       </div>
                     )}
                   </div>
                 </div>
               </section>
 
-              {/* ── Financial & Availability ── */}
-              <section>
+              {isCandidateFieldVisible('education') && (
+                <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="text-base font-semibold text-blue-700 border-b border-blue-100 pb-2 mb-4 flex items-center gap-2">
+                    <GraduationCap className="h-5 w-5" /> Education & Qualification
+                  </h3>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Qualification</label>
+                    <input
+                      type="text"
+                      value={formData.education}
+                      onChange={(e) => handleInputChange('education', e.target.value)}
+                      className={inputCls(errors.education)}
+                      placeholder="e.g. B.Tech from IIT Delhi"
+                    />
+                    {errors.education && <p className="text-xs text-red-500 mt-1">{errors.education}</p>}
+                  </div>
+                </section>
+              )}
+
+              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                 <h3 className="text-base font-semibold text-blue-700 border-b border-blue-100 pb-2 mb-4">Financial & Availability</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    {!isHidden('ctc') && (
+                  {(isCandidateFieldVisible('ctc') || isCandidateFieldVisible('currentTakeHome')) && <div className="flex flex-col sm:flex-row gap-2">
+                    {isCandidateFieldVisible('ctc') && (
                       <div className="w-full sm:w-1/2">
                         <label className="block text-sm font-medium mb-1 text-slate-700">Current CTC</label>
                         <input type="text" value={formData.ctc} onChange={(e) => handleInputChange('ctc', e.target.value)} className={inputCls(false)} placeholder="e.g. 10 LPA" />
                       </div>
                     )}
-                    {!isHidden('currentTakeHome') && (
+                    {isCandidateFieldVisible('currentTakeHome') && (
                       <div className="w-full sm:w-1/2">
                         <label className="block text-sm font-medium mb-1 text-slate-700">Current Take Home</label>
                         <input type="text" value={formData.currentTakeHome} onChange={(e) => handleInputChange('currentTakeHome', e.target.value)} className={inputCls(false)} placeholder="e.g. 60k/mo" />
                       </div>
                     )}
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    {!isHidden('ectc') && (
+                  </div>}
+
+                  {(isCandidateFieldVisible('ectc') || isCandidateFieldVisible('expectedTakeHome')) && <div className="flex flex-col sm:flex-row gap-2">
+                    {isCandidateFieldVisible('ectc') && (
                       <div className="w-full sm:w-1/2">
                         <label className="block text-sm font-medium mb-1 text-slate-700">Expected CTC</label>
                         <input type="text" value={formData.ectc} onChange={(e) => handleInputChange('ectc', e.target.value)} className={inputCls(false)} placeholder="e.g. 15 LPA" />
                       </div>
                     )}
-                    {!isHidden('expectedTakeHome') && (
+                    {isCandidateFieldVisible('expectedTakeHome') && (
                       <div className="w-full sm:w-1/2">
                         <label className="block text-sm font-medium mb-1 text-slate-700">Expected Take Home</label>
                         <input type="text" value={formData.expectedTakeHome} onChange={(e) => handleInputChange('expectedTakeHome', e.target.value)} className={inputCls(false)} placeholder="e.g. 90k/mo" />
                       </div>
                     )}
-                  </div>
-                  {!isHidden('noticePeriod') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Notice Period</label>
-                      <input type="text" value={formData.noticePeriod} onChange={(e) => handleInputChange('noticePeriod', e.target.value)} className={inputCls(false)} placeholder="e.g. 30 Days" />
-                    </div>
-                  )}
-                  {!isHidden('servingNoticePeriod') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Serving Notice Period?</label>
-                      <select value={formData.servingNoticePeriod} onChange={(e) => handleInputChange('servingNoticePeriod', e.target.value)} className={inputCls(false)}>
-                        <option value="false">No</option>
-                        <option value="true">Yes</option>
-                      </select>
-                    </div>
-                  )}
-                  {!isHidden('servingNoticePeriod') && formData.servingNoticePeriod === 'true' && (
+                  </div>}
+
+                  {isCandidateFieldVisible('noticePeriod') && <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Notice Period (N/P)</label>
+                    <input type="text" value={formData.noticePeriod} onChange={(e) => handleInputChange('noticePeriod', e.target.value)} className={inputCls(false)} placeholder="e.g. 30 Days" />
+                  </div>}
+                  {isCandidateFieldVisible('servingNoticePeriod') && <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Serving Notice Period?</label>
+                    <select value={formData.servingNoticePeriod} onChange={(e) => handleInputChange('servingNoticePeriod', e.target.value)} className={inputCls(false)}>
+                      <option value="false">No</option>
+                      <option value="true">Yes</option>
+                    </select>
+                  </div>}
+
+                  {formData.servingNoticePeriod === 'true' && (
                     <div>
                       <label className="block text-sm font-medium mb-1 text-slate-700">LWD (Last Working Day) *</label>
                       <input type="date" value={formData.lwd} onChange={(e) => handleInputChange('lwd', e.target.value)} className={inputCls(errors.lwd)} />
                       {errors.lwd && <p className="text-xs text-red-500 mt-1">{errors.lwd}</p>}
                     </div>
                   )}
-                  {!isHidden('offersInHand') && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Offer in Hand?</label>
-                      <select value={formData.offersInHand} onChange={(e) => handleInputChange('offersInHand', e.target.value)} className={inputCls(false)}>
-                        <option value="false">No</option>
-                        <option value="true">Yes</option>
-                      </select>
-                    </div>
-                  )}
-                  {!isHidden('offersInHand') && formData.offersInHand === 'true' && (
+
+                  {isCandidateFieldVisible('offersInHand') && <div>
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Offer in Hand?</label>
+                    <select value={formData.offersInHand} onChange={(e) => handleInputChange('offersInHand', e.target.value)} className={inputCls(false)}>
+                      <option value="false">No</option>
+                      <option value="true">Yes</option>
+                    </select>
+                  </div>}
+
+                  {formData.offersInHand === 'true' && (
                     <div>
                       <label className="block text-sm font-medium mb-1 text-slate-700">Package in Hand *</label>
                       <input type="text" value={formData.offerPackage} onChange={(e) => handleInputChange('offerPackage', e.target.value)} className={inputCls(errors.offerPackage)} placeholder="e.g. 15 LPA" />
@@ -2077,498 +2410,360 @@ export default function AdminCandidates() {
                 </div>
               </section>
 
-              {/* ── Custom Fields (Tenant-defined dynamic fields) ── */}
-              {tenantCustomFields.filter(cf => !isHidden(cf.fieldName)).length > 0 && (
-                <section>
-                  <h3 className="text-base font-semibold text-blue-700 border-b border-blue-100 pb-2 mb-4 flex items-center gap-2">
-                    <Settings2 className="h-4 w-4" />
-                    Additional Details
-                    <span className="ml-2 text-xs font-normal text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{tenantCustomFields.filter(cf => !isHidden(cf.fieldName)).length} custom field{tenantCustomFields.filter(cf => !isHidden(cf.fieldName)).length !== 1 ? 's' : ''}</span>
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {tenantCustomFields.filter(cf => !isHidden(cf.fieldName)).map((cf, idx) => (
-                      <div key={idx}>
-                        <label className="block text-sm font-medium mb-1 text-slate-700 flex items-center gap-1.5">
-                          {cf.fieldName}
-                          <span className="text-[10px] font-normal text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-wide">{cf.fieldType}</span>
-                        </label>
-                        <CustomFieldInput
-                          cf={cf}
-                          value={formData.customFields?.[cf.fieldName]}
-                          onChange={handleCustomFieldChange}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* ── Tracking & Assignment ── */}
-              <section>
-                <h3 className="text-base font-semibold text-blue-700 border-b border-blue-100 pb-2 mb-4">Tracking & Assignment</h3>
+              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 className="text-base font-semibold text-blue-700 border-b border-blue-100 pb-2 mb-4">Tracking &amp; Assignment</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
+                  {isCandidateFieldVisible('source') && <div>
                     <label className="block text-sm font-medium mb-1 text-slate-700">Source</label>
                     <select value={formData.source} onChange={(e) => handleInputChange('source', e.target.value)} className={inputCls(false)}>
-                      {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+                      {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
-                  </div>
+                  </div>}
 
-                  {isManagerOrAdmin && (
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium mb-1 text-slate-700">Assign to User</label>
-                      <select value={formData.recruiterId} onChange={(e) => handleInputChange('recruiterId', e.target.value)} className={inputCls(false)}>
-                        <option value="">Select User</option>
-                        {recruiters.map((r) => <option key={r._id || r.id} value={r._id || r.id}>{getRecruiterLabel(r)}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  <div className="md:col-span-2">
+                  {isCandidateFieldVisible('recruiterId') && <div className="md:col-span-2">
+                    <label className="block text-sm font-medium mb-1 text-slate-700">Assign to User</label>
+                    <select value={formData.recruiterId} onChange={(e) => handleInputChange('recruiterId', e.target.value)} className={inputCls(false)}>
+                      <option value="">Select User</option>
+                      {recruiters.map((r) => <option key={r._id || r.id} value={r._id || r.id}>{getRecruiterLabel(r)}</option>)}
+                    </select>
+                  </div>}
+                  {isCandidateFieldVisible('remarks') && <div className="md:col-span-2">
                     <label className="block text-sm font-medium mb-1 text-slate-700">Remarks</label>
-                    <Textarea value={formData.remarks} onChange={(e) => handleInputChange('remarks', e.target.value)} className={inputCls(false)} placeholder="Add any comments or remarks here…" rows={3} />
-                  </div>
+                    <Textarea value={formData.remarks} onChange={(e) => handleInputChange('remarks', e.target.value)} className={inputCls(false)} placeholder="Add any comments or remarks here..." rows={3} />
+                  </div>}
                 </div>
               </section>
 
-              {isEditMode && viewingCandidate && (
-                <div className="mt-8 border-t pt-6">
-                  {/* Deliveries & Submissions Section */}
-                  <div className="bg-slate-50 p-4 rounded-lg space-y-3 col-span-2">
-                    <h3 className="font-semibold text-slate-800 border-b pb-2 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Building className="h-4 w-4" /> Client Deliveries & Pipeline
-                      </div>
-                    </h3>
-                    
-                    {/* List of current deliveries */}
-                    <div className="space-y-4">
-                      {!viewingCandidate.submissions || viewingCandidate.submissions.length === 0 ? (
-                        <p className="text-sm text-slate-500 italic">No client deliveries recorded for this candidate.</p>
-                      ) : (
-                        <div className="space-y-4">
-                          {viewingCandidate.submissions.map((sub) => (
-                            <div key={sub._id} className="border border-slate-200 rounded-xl p-4 bg-white shadow-sm space-y-4">
-                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                                <div>
-                                  <div className="font-bold text-slate-900 text-base">
-                                    {sub.clientName}
-                                    {sub.jobId && sub.jobId.position && (
-                                      <span className="text-sm font-normal text-slate-500 ml-2">({sub.jobId.position})</span>
-                                    )}
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-2 mt-1">
-                                    <span className="text-xs font-mono font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
-                                      {sub.clientCandidateId || '-'}
-                                    </span>
-                                    <span className="text-xs text-slate-400">
-                                      Delivered: {formatDate(sub.dateAdded || sub.createdAt)}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end">
-                                  <select
-                                    value={sub.status}
-                                    onChange={(e) => handleUpdateSubmission(sub._id, e.target.value, sub.remarks)}
-                                    className="w-[160px] border border-slate-300 rounded-lg px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                  >
-                                    {STATUS_FLOW_ORDER.map(st => (
-                                      <option key={st} value={st}>{st}</option>
-                                    ))}
-                                  </select>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteSubmission(sub._id)}
-                                    className="p-2 text-red-600 hover:bg-red-50 hover:text-red-700 rounded-lg border border-slate-200 hover:border-red-100 transition shrink-0"
-                                    title="Retract/Delete Delivery"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                </div>
-                              </div>
-
-
-                              {/* Remarks/Notes for this delivery */}
-                              <div className="space-y-1">
-                                <label className="text-xs text-slate-500">Remarks / Updates</label>
-                                <input
-                                  type="text"
-                                  placeholder="Add feedback/remarks for this client submission..."
-                                  defaultValue={sub.remarks || ''}
-                                  onBlur={(e) => {
-                                    if (e.target.value !== (sub.remarks || '')) {
-                                      handleUpdateSubmission(sub._id, sub.status, e.target.value);
-                                    }
-                                  }}
-                                  className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Additional Fields</p>
+                    <h3 className="text-base font-semibold text-slate-900 mt-1">Custom candidate inputs</h3>
                   </div>
+                  <button onClick={() => setCandidateFormControlOpen(true)} className="inline-flex items-center justify-center gap-2 px-3 py-2 border border-slate-300 bg-white rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 transition">
+                    <SlidersHorizontal className="h-4 w-4" /> Manage Fields
+                  </button>
                 </div>
-              )}
+                {visibleCustomCandidateFields.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {visibleCustomCandidateFields.map(field => (
+                      <div key={field.fieldName} className={field.fieldType === 'textarea' ? 'md:col-span-2' : ''}>
+                        <label className="block text-sm font-medium mb-1 text-slate-700">{field.label}</label>
+                        <CandidateCustomFieldInput field={field} value={formData.customFields?.[field.fieldName]} onChange={handleCustomCandidateFieldChange} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center">
+                    <p className="text-sm font-medium text-slate-800">No additional fields enabled</p>
+                    <p className="text-xs text-slate-500 mt-1">Use Form Control to add or show custom fields here.</p>
+                  </div>
+                )}
+              </section>
             </div>
 
-            {/* Dialog Footer */}
-            <div className="p-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 shrink-0">
+            <div className="p-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
               <button onClick={() => setIsDialogOpen(false)} className="px-5 py-2.5 border border-slate-300 bg-white rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 transition">Cancel</button>
               <button onClick={handleSubmit} disabled={isSubmitting} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">
                 {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                {isSubmitting ? 'Saving…' : isEditMode ? 'Update Profile' : 'Save Candidate'}
+                {isSubmitting ? 'Saving...' : isEditMode ? 'Update Profile' : 'Save Candidate'}
               </button>
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          VIEW DIALOG
-      ══════════════════════════════════════════════════════════════════════ */}
+      <CandidateFormControlModal
+        isOpen={candidateFormControlOpen}
+        onClose={() => setCandidateFormControlOpen(false)}
+        config={candidateFieldConfig}
+        onConfigChange={handleCandidateConfigChange}
+      />
+
+      <BulkCandidateImportModal
+        open={isImportDialogOpen}
+        onClose={() => setIsImportDialogOpen(false)}
+        apiUrl={API_URL}
+        getHeaders={getAuthHeader}
+        onImported={fetchData}
+      />
+
+      <CandidateExportModal
+        open={isExportDialogOpen}
+        onClose={() => setIsExportDialogOpen(false)}
+        candidates={filteredCandidates}
+        standardColumns={candidateExportColumns}
+        customFields={candidateFieldConfig.customFields}
+      />
+
+      <JobInvitationModal
+        open={isJobInviteOpen}
+        onClose={() => setIsJobInviteOpen(false)}
+        candidates={selectedCandidateRecords}
+        jobs={jobs}
+        apiUrl={API_URL}
+        authHeaders={getAuthHeader}
+        onSent={handleJobInviteResult}
+      />
+
       {isViewDialogOpen && viewCandidate && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden">
-            <div className="p-6 border-b border-slate-200 bg-slate-50 flex justify-between items-start">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">{viewCandidate.name}</h2>
-                <p className="text-sm font-mono text-blue-600 mt-1">{getCandidateId(viewCandidate)}</p>
-              </div>
-              <div className="flex items-center gap-4">
-                {viewCandidate.requirementId && (
-                  <button 
-                    onClick={async () => {
-                      setIsScoringCandidate(true);
-                      setCandidateScoreData(null);
-                      try {
-                        const headers = getAuthHeader();
-                        const res = await fetch(`${API_URL}/score-match`, {
-                          method: 'POST',
-                          headers: { ...headers, 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ candidateId: viewCandidate._id, requirementId: viewCandidate.requirementId })
-                        });
-                        if (res.ok) {
-                          setCandidateScoreData(await res.json());
-                          setScoreExpanded(true);
-                        }
-                      } catch(e) {} finally { setIsScoringCandidate(false); }
-                    }}
-                    disabled={isScoringCandidate}
-                    className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-sm font-semibold transition"
-                  >
-                    {isScoringCandidate ? <><Loader2 className="w-4 h-4 animate-spin"/> Scoring...</> : 'Score Candidate'}
-                  </button>
-                )}
-                <button onClick={() => setIsViewDialogOpen(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold leading-none px-2">×</button>
-              </div>
-            </div>
-            
-            {/* Score Match Panel */}
-            {candidateScoreData && (
-              <div className="border-b border-slate-200 bg-white">
-                <div 
-                  className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition"
-                  onClick={() => setScoreExpanded(!scoreExpanded)}
+        <ModalPortal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsViewDialogOpen(false)} />
+          <div
+            className="relative bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl w-full max-w-7xl max-h-[95vh] overflow-hidden flex flex-col border border-zinc-200/60 dark:border-zinc-800/60"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="relative bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 px-8 pt-8 pb-6 shrink-0">
+              <button
+                onClick={() => setIsViewDialogOpen(false)}
+                className="absolute top-4 right-4 p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-start gap-5">
+                <div
+                  className="rounded-2xl bg-white/20 border-2 border-white/30 flex items-center justify-center text-white text-2xl font-black select-none shrink-0 shadow-lg"
+                  style={{ width: '72px', height: '72px' }}
                 >
-                  <div className="flex items-center gap-4">
-                    <ScoreBadge score={getScoreValue(candidateScoreData)} />
-                    <div>
-                      <h3 className="font-bold text-slate-900">Score Match</h3>
-                      <span className={`inline-flex items-center px-2 py-0.5 mt-1 rounded text-xs font-semibold border ${getMatchLevelClass(candidateScoreData.matchLevel)}`}>
-                        {candidateScoreData.matchLevel}
+                  {(viewCandidate.name || `${viewCandidate.firstName || ''} ${viewCandidate.lastName || ''}`.trim() || 'C')
+                    .split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-2xl font-black text-white leading-tight truncate">
+                    <CandidateProfileLink candidate={viewCandidate} className="text-white hover:text-indigo-100 transition-colors">
+                      {viewCandidate.name || `${viewCandidate.firstName || ''} ${viewCandidate.lastName || ''}`.trim()}
+                    </CandidateProfileLink>
+                  </h2>
+                  <p className="text-indigo-200 text-sm font-semibold mt-0.5">
+                    {viewCandidate.position || 'Position not set'}{viewCandidate.currentCompany ? ` · ${viewCandidate.currentCompany}` : ''}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 mt-3">
+                    <span className="inline-flex items-center gap-1.5 bg-white/15 border border-white/20 rounded-full px-3 py-1 text-xs font-bold text-white">
+                      <UserCircle className="w-3 h-3" /> {getCandidateId(viewCandidate)}
+                    </span>
+                    {viewCandidate.totalExperience && (
+                      <span className="inline-flex items-center gap-1.5 bg-white/15 border border-white/20 rounded-full px-3 py-1 text-xs font-bold text-white">
+                        <Briefcase className="w-3 h-3" /> {viewCandidate.totalExperience} yrs exp
                       </span>
-                    </div>
+                    )}
+                    {viewCandidate.currentLocation && (
+                      <span className="inline-flex items-center gap-1.5 bg-white/15 border border-white/20 rounded-full px-3 py-1 text-xs font-bold text-white">
+                        📍 {viewCandidate.currentLocation}
+                      </span>
+                    )}
+                    {getCandidateStatuses(viewCandidate).slice(0, 3).map(status => (
+                      <StatusBadge key={status} status={status} />
+                    ))}
                   </div>
-                  {scoreExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
                 </div>
-                {scoreExpanded && (
-                  <div className="px-6 pb-6 pt-2 bg-slate-50/50 border-t border-slate-100">
-                    <MatchBreakdownBar breakdown={candidateScoreData.breakdown} />
-                    <MatchReasonBox reason={candidateScoreData.reason} flags={candidateScoreData.atsFlags} />
-                    <SkillChips
-                      matched={candidateScoreData.matchedSkills}
-                      missing={candidateScoreData.missingSkills}
-                      matchedMandatory={candidateScoreData.matchedMandatorySkills}
-                      missingMandatory={candidateScoreData.missingMandatorySkills}
-                      matchedPreferred={candidateScoreData.matchedPreferredSkills}
-                      missingPreferred={candidateScoreData.missingPreferredSkills}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
 
-            <div className="p-6 overflow-y-auto flex-1 space-y-4 text-sm">
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  ['First Name', viewCandidate.firstName],
-                  ['Last Name', viewCandidate.lastName],
-                  ['Email', viewCandidate.email],
-                  ['Contact', viewCandidate.contact],
-                  !isHidden('alternateNumber') && ['Alt Contact', viewCandidate.alternateNumber],
-                  !isHidden('gender') && ['Gender', viewCandidate.gender],
-                  !isHidden('linkedin') && ['LinkedIn', viewCandidate.linkedin],
-                  ['Role', viewCandidate.position],
-                  ['Skills', (
-                    <div className="flex flex-wrap gap-1.5 mt-1">
-                      {Array.isArray(viewCandidate.skills) ? (
-                        viewCandidate.skills.map(s => (
-                          <span key={s} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50/50 text-blue-700 border border-blue-200">
-                            {s}
-                          </span>
-                        ))
-                      ) : (
-                        viewCandidate.skills ? (
-                          viewCandidate.skills.split(',').map(s => s.trim()).filter(Boolean).map(s => (
-                            <span key={s} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50/50 text-blue-700 border border-blue-200">
-                              {s}
-                            </span>
-                          ))
-                        ) : '-'
-                      )}
-                    </div>
-                  )],
-                  ['Client Deliveries', viewCandidate.submissions && viewCandidate.submissions.length > 0 ? (
-                    <div className="flex flex-col gap-4 mt-2">
-                      {viewCandidate.submissions.map(sub => {
-                        const pipelineSteps = ['Submitted', 'Shared Profiles', 'Yet to attend', 'Turnups', 'Selected', 'Joined'];
-                        const isFailure = ['Rejected', 'No Show', 'Backout', 'Hold'].includes(sub.status);
-                        const currentIndex = pipelineSteps.indexOf(sub.status);
-
-                        return (
-                          <div key={sub._id} className="border border-slate-200 bg-white p-4 rounded-xl shadow-sm">
-                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-4">
-                              <div>
-                                <div className="font-bold text-slate-900">
-                                  {sub.clientName}
-                                  {sub.jobId && sub.jobId.position && (
-                                    <span className="text-xs font-normal text-slate-500 ml-2">({sub.jobId.position})</span>
-                                  )}
-                                </div>
-                                <div className="text-xs text-slate-400 mt-0.5">
-                                  ID: <span className="font-semibold text-blue-600">{sub.clientCandidateId || '-'}</span> • Date: {new Date(sub.dateAdded || sub.createdAt).toLocaleDateString()}
-                                </div>
-                              </div>
-                              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border ${getStatusBadgeColor(sub.status)}`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${getStatusDotColor(sub.status)}`} />
-                                {sub.status}
-                              </span>
-                            </div>
-
-                            <div className="relative pt-4 pb-2 px-2 hidden sm:block">
-                              <div className="absolute top-7 left-4 right-4 h-1 bg-slate-100 rounded-full z-0"></div>
-                              
-                              <div className="relative flex justify-between z-10">
-                                {pipelineSteps.map((step, idx) => {
-                                  let isActive = false;
-                                  let isPast = false;
-                                  
-                                  if (currentIndex !== -1) {
-                                    isActive = idx === currentIndex;
-                                    isPast = idx < currentIndex;
-                                  } else {
-                                    if (idx === 0) isPast = true;
-                                  }
-                                  
-                                  const isCompleted = isPast || isActive;
-                                  
-                                  return (
-                                    <div key={step} className="flex flex-col items-center gap-2 w-16 relative">
-                                      <div className={`w-7 h-7 rounded-full flex items-center justify-center border-2 text-xs font-bold bg-white transition-colors duration-300 z-10 ${
-                                        isCompleted ? 'border-blue-500 text-blue-600' : 'border-slate-200 text-slate-300'
-                                      }`}>
-                                        {isPast ? <Check className="w-4 h-4 text-blue-500" /> : idx + 1}
-                                      </div>
-                                      <span className={`text-[10px] text-center font-medium leading-tight ${
-                                        isCompleted ? 'text-slate-800' : 'text-slate-400'
-                                      }`}>
-                                        {step}
-                                      </span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                            {isFailure && (
-                              <div className="mt-4 px-3 py-2 bg-red-50/50 border border-red-100 rounded-lg text-xs flex items-center justify-center gap-2 text-red-600 font-medium">
-                                <Ban className="w-3.5 h-3.5" /> Pipeline stopped: {sub.status}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : 'No client deliveries'],
-                  !isHidden('currentCompany') && ['Current Company', viewCandidate.currentCompany],
-                  !isHidden('industry') && ['Industry', viewCandidate.industry],
-                  !isHidden('currentLocation') && ['Current Location', viewCandidate.currentLocation],
-                  !isHidden('preferredLocation') && ['Preferred Location', viewCandidate.preferredLocation],
-                  !isHidden('totalExperience') && ['Total Exp', viewCandidate.totalExperience ? `${viewCandidate.totalExperience} Yrs` : null],
-                  !isHidden('relevantExperience') && ['Relevant Exp', viewCandidate.relevantExperience ? `${viewCandidate.relevantExperience} Yrs` : null],
-                  !isHidden('education') && ['Educational Qualification', viewCandidate.education],
-                  !isHidden('ctc') && ['Current CTC', viewCandidate.ctc ? `${viewCandidate.ctc} LPA` : null],
-                  !isHidden('currentTakeHome') && ['Current Take Home', viewCandidate.currentTakeHome],
-                  !isHidden('ectc') && ['Expected CTC', viewCandidate.ectc ? `${viewCandidate.ectc} LPA` : null],
-                  !isHidden('expectedTakeHome') && ['Expected Take Home', viewCandidate.expectedTakeHome],
-                  !isHidden('noticePeriod') && ['Notice Period', viewCandidate.noticePeriod],
-                  !isHidden('servingNoticePeriod') && ['Serving Notice?', viewCandidate.servingNoticePeriod ? 'Yes' : 'No'],
-                  !isHidden('lwd') && ['LWD', viewCandidate.lwd ? new Date(viewCandidate.lwd).toLocaleDateString() : null],
-                  !isHidden('reasonForChange') && ['Reason for Change', viewCandidate.reasonForChange],
-                  !isHidden('offersInHand') && ['Offers in Hand', viewCandidate.offersInHand ? `Yes${viewCandidate.offerPackage ? ` (${viewCandidate.offerPackage})` : ''}` : 'No'],
-                  ['Source', viewCandidate.source],
-                  ['Recruiter', typeof viewCandidate.recruiterId === 'object' ? getRecruiterName(viewCandidate.recruiterId) : viewCandidate.recruiterName],
-                  ['Remarks', viewCandidate.remarks],
-                  // Custom fields
-                  ...(viewCandidate.customFields ? Object.entries(viewCandidate.customFields).map(([k, v]) => [k, v]) : []),
-                ].filter(Boolean).map(([label, val]) => val ? (
-                  <div key={label} className={`border-b border-slate-100 pb-2 ${label === 'Client Deliveries' ? 'col-span-2' : 'col-span-2 md:col-span-1'}`}>
-                    <span className="block text-xs font-semibold text-slate-500 uppercase mb-1">{label}</span>
-                    <div className="text-slate-900 font-medium">{val}</div>
-                  </div>
-                ) : null)}
-              </div>
-            </div>
-            <div className="p-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
-              <button onClick={() => { setIsViewDialogOpen(false); openEditDialog(viewCandidate); }} className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Edit Details</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════════════════════
-          FORM SETTINGS MODAL (Manager/Admin only)
-      ══════════════════════════════════════════════════════════════════════ */}
-      {isSettingsOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
-
-            <div className="p-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                  <Settings2 className="w-5 h-5 text-blue-600" />
-                  Candidate Form Settings
-                </h2>
-                <p className="text-sm text-slate-500 mt-0.5">Customize visible fields and add custom fields for your company.</p>
-              </div>
-              <button onClick={() => setIsSettingsOpen(false)} className="text-slate-400 hover:text-slate-600 font-bold text-2xl leading-none px-2">×</button>
-            </div>
-
-            <div className="p-6 overflow-y-auto flex-1 space-y-8">
-
-              {/* ── Section 1: Toggle standard fields visibility ── */}
-              <section>
-                <h3 className="text-sm font-bold text-slate-800 mb-1 uppercase tracking-wider">Standard Fields Visibility</h3>
-                <p className="text-sm text-slate-500 mb-4">Uncheck fields you don't need. Mandatory fields (Name, Email, Phone) cannot be hidden.</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {OPTIONAL_STANDARD_FIELDS.map((field) => {
-                    const isHiddenField = tempHiddenFields.includes(field.id);
-                    return (
-                      <label key={field.id} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors select-none ${!isHiddenField ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-slate-50 opacity-60'}`}>
-                        <input type="checkbox" checked={!isHiddenField} onChange={() => handleToggleHiddenField(field.id)} className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer" />
-                        <span className={`text-sm font-medium ${!isHiddenField ? 'text-blue-900' : 'text-slate-500 line-through'}`}>{field.label}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </section>
-
-              <hr className="border-slate-100" />
-
-              {/* ── Section 2: Custom Fields (Add / Edit / Delete) ── */}
-              <section>
-                <h3 className="text-sm font-bold text-slate-800 mb-1 uppercase tracking-wider">Custom Fields</h3>
-                <p className="text-sm text-slate-500 mb-4">Add new fields specific to your hiring needs. These appear in every candidate form and view.</p>
-
-                {/* Input Row */}
-                <div className={`flex flex-col sm:flex-row gap-3 items-start sm:items-end p-4 rounded-xl border mb-4 transition-colors ${editingFieldIndex !== null ? 'bg-blue-50/60 border-blue-300' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="flex-1 w-full">
-                    <label className="text-xs font-semibold text-slate-500 uppercase mb-1 block">Field Name</label>
-                    <input
-                      type="text"
-                      value={newFieldName}
-                      onChange={(e) => setNewFieldName(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleAddOrUpdateCustomField(); }}
-                      placeholder="e.g. Passport Number, Aadhar, Willing to Relocate?"
-                      className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white ${editingFieldIndex !== null ? 'border-blue-400' : 'border-slate-300'}`}
-                    />
-                  </div>
-                  <div className="w-full sm:w-48">
-                    <label className="text-xs font-semibold text-slate-500 uppercase mb-1 block">Field Type</label>
-                    <select
-                      value={newFieldType}
-                      onChange={(e) => setNewFieldType(e.target.value)}
-                      className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white ${editingFieldIndex !== null ? 'border-blue-400' : 'border-slate-300'}`}
-                    >
-                      <option value="text">Text (Short Answer)</option>
-                      <option value="number">Number</option>
-                      <option value="date">Date</option>
-                      <option value="boolean">Yes / No</option>
-                    </select>
-                  </div>
-                  <div className="w-full sm:w-auto sm:self-end flex flex-col gap-1.5">
-                    <button
-                      onClick={handleAddOrUpdateCustomField}
-                      className={`w-full flex items-center justify-center gap-2 text-white px-4 py-2 rounded-lg text-sm font-medium transition ${editingFieldIndex !== null ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-800 hover:bg-slate-900'}`}
-                    >
-                      {editingFieldIndex !== null ? <><Check className="w-4 h-4" /> Update Field</> : <><Plus className="w-4 h-4" /> Add Field</>}
+                <div className="flex gap-2 shrink-0 mr-14">
+                  {viewCandidate.contact && (
+                    <a href={`tel:${viewCandidate.contact}`}
+                      className="p-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white border border-white/20 transition-colors" title="Call">
+                      <Phone className="w-4 h-4" />
+                    </a>
+                  )}
+                  {viewCandidate.email && (
+                    <a href={`mailto:${viewCandidate.email}`}
+                      className="p-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white border border-white/20 transition-colors" title="Email">
+                      <Mail className="w-4 h-4" />
+                    </a>
+                  )}
+                  {viewCandidate.contact && (
+                    <button onClick={() => handleWhatsApp(viewCandidate)}
+                      className="p-2.5 rounded-xl bg-green-500/80 hover:bg-green-500 text-white border border-green-400/40 transition-colors" title="WhatsApp">
+                      <MessageCircle className="w-4 h-4" />
                     </button>
-                    {editingFieldIndex !== null && (
-                      <button onClick={() => { setEditingFieldIndex(null); setNewFieldName(''); setNewFieldType('text'); }} className="text-xs text-center text-slate-500 hover:text-slate-800 font-medium transition">
-                        Cancel Edit
-                      </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-5 bg-zinc-50/50 dark:bg-zinc-950/30">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/60 p-5 shadow-sm space-y-3">
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
+                    <UserCircle className="w-3.5 h-3.5" /> Personal Info
+                  </h3>
+                  <div className="space-y-2.5 text-sm">
+                    {[
+                      { label: 'First Name', value: viewCandidate.firstName },
+                      { label: 'Last Name', value: viewCandidate.lastName },
+                      { label: 'Email', value: viewCandidate.email, href: `mailto:${viewCandidate.email}` },
+                      { label: 'Phone', value: viewCandidate.contact, href: `tel:${viewCandidate.contact}` },
+                      { label: 'Alt Contact', value: viewCandidate.alternateNumber },
+                      { label: 'Date of Birth', value: viewCandidate.dateOfBirth ? new Date(viewCandidate.dateOfBirth).toLocaleDateString() : null },
+                      { label: 'Gender', value: viewCandidate.gender },
+                      { label: 'Current Location', value: viewCandidate.currentLocation },
+                      { label: 'Preferred Location', value: viewCandidate.preferredLocation },
+                    ].map(({ label, value, href }) => value ? (
+                      <div key={label}>
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{label}</div>
+                        {href
+                          ? <a href={href} className="font-semibold text-indigo-600 dark:text-indigo-400 hover:underline truncate block">{value}</a>
+                          : <div className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">{value}</div>
+                        }
+                      </div>
+                    ) : null)}
+                    {viewCandidate.linkedin && (
+                      <div>
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">LinkedIn</div>
+                        <a href={viewCandidate.linkedin} target="_blank" rel="noopener noreferrer"
+                          className="font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 truncate">
+                          <Linkedin className="w-3.5 h-3.5 shrink-0" /> View Profile
+                        </a>
+                      </div>
                     )}
                   </div>
                 </div>
 
-                {/* Custom Fields List */}
-                {tempCustomFields.length === 0 ? (
-                  <div className="text-center py-8 text-slate-400 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 text-sm">
-                    No custom fields added yet. Use the form above to add your first one.
+                <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/60 p-5 shadow-sm space-y-3">
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-violet-600 dark:text-violet-400 flex items-center gap-1.5">
+                    <Briefcase className="w-3.5 h-3.5" /> Professional
+                  </h3>
+                  <div className="space-y-2.5 text-sm">
+                    {[
+                      { label: 'Current Role', value: viewCandidate.position },
+                      { label: 'Current Company', value: viewCandidate.currentCompany },
+                      { label: 'Total Experience', value: viewCandidate.totalExperience ? `${viewCandidate.totalExperience} Yrs` : null },
+                      { label: 'Relevant Experience', value: viewCandidate.relevantExperience ? `${viewCandidate.relevantExperience} Yrs` : null },
+                      { label: 'Notice Period', value: viewCandidate.noticePeriod },
+                      { label: 'Serving Notice?', value: viewCandidate.servingNoticePeriod ? 'Yes' : null },
+                      { label: 'Last Working Day', value: viewCandidate.lwd ? new Date(viewCandidate.lwd).toLocaleDateString() : null },
+                      { label: 'Offers in Hand', value: viewCandidate.offersInHand ? `Yes${viewCandidate.offerPackage ? ` (${viewCandidate.offerPackage})` : ''}` : null },
+                      { label: 'Remarks', value: viewCandidate.remarks },
+                    ].map(({ label, value }) => value ? (
+                      <div key={label}>
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{label}</div>
+                        <div className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">{value}</div>
+                      </div>
+                    ) : null)}
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    {tempCustomFields.map((field, index) => (
-                      <div key={index} className={`flex justify-between items-center p-3 border rounded-xl shadow-sm transition-colors ${editingFieldIndex === index ? 'bg-blue-50 border-blue-300' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
-                        <div className="flex items-center gap-3">
-                          <GripVertical className="w-4 h-4 text-slate-300" />
-                          <span className={`font-mono text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider ${editingFieldIndex === index ? 'bg-blue-200 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
-                            {field.fieldType}
-                          </span>
-                          <span className="font-medium text-slate-800 text-sm">{field.fieldName}</span>
-                        </div>
-                        <div className="flex gap-1">
-                          <button onClick={() => handleEditCustomField(index)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Edit">
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => handleRemoveCustomField(index)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Remove">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                </div>
+
+                <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/60 p-5 shadow-sm space-y-3">
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                    <IndianRupee className="w-3.5 h-3.5" /> Compensation &amp; Source
+                  </h3>
+                  <div className="space-y-2.5 text-sm">
+                    {[
+                      { label: 'Current CTC', value: viewCandidate.ctc },
+                      { label: 'Expected CTC', value: viewCandidate.ectc },
+                      { label: 'Source', value: viewCandidate.source },
+                    ].map(({ label, value }) => value ? (
+                      <div key={label}>
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{label}</div>
+                        <div className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">{value}</div>
+                      </div>
+                    ) : null)}
+                    <div>
+                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Assigned Recruiter</div>
+                      <div className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">
+                        <RecruiterDetailsTrigger
+                          recruiter={getCandidateRecruiterDetails(viewCandidate, recruiters)}
+                          className="text-indigo-600 dark:text-indigo-400 hover:underline"
+                        >
+                          {typeof viewCandidate.recruiterId === 'object'
+                            ? getRecruiterName(viewCandidate.recruiterId)
+                            : viewCandidate.recruiterName || 'Unassigned'}
+                        </RecruiterDetailsTrigger>
+                      </div>
+                    </div>
+                    {viewCandidate.createdAt && (
+                      <div>
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Added On</div>
+                        <div className="font-semibold text-zinc-800 dark:text-zinc-200">
+                          {new Date(viewCandidate.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}
                         </div>
                       </div>
-                    ))}
+                    )}
+                    {getCandidateStatuses(viewCandidate).length > 0 && (
+                      <div>
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Pipeline Status</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {getCandidateStatuses(viewCandidate).map(status => (
+                            <StatusBadge key={status} status={status} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </section>
+                </div>
+              </div>
 
+              {viewCandidate.skills && viewCandidate.skills.length > 0 && (
+                <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/60 p-5 shadow-sm">
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400 flex items-center gap-1.5 mb-3">
+                    <Award className="w-3.5 h-3.5" /> Skills &amp; Expertise
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {(Array.isArray(viewCandidate.skills) ? viewCandidate.skills : String(viewCandidate.skills).split(','))
+                      .map((s, i) => (
+                        <span key={i} className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-900/40">
+                          {String(s).trim()}
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/60 p-5 shadow-sm">
+                <h3 className="text-[10px] font-black uppercase tracking-widest text-rose-600 dark:text-rose-400 flex items-center gap-1.5 mb-4">
+                  <Target className="w-3.5 h-3.5" /> Client-wise Submission Pipeline
+                </h3>
+                <CandidatePipelinePanel
+                  candidateId={viewCandidate._id}
+                  apiUrl={API_URL}
+                  authHeaders={getAuthHeader}
+                />
+              </div>
+
+              {viewCandidate.notes && (
+                <div className="bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200/50 dark:border-amber-900/20 rounded-2xl p-5">
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400 mb-2">Notes</h3>
+                  <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap">{viewCandidate.notes}</p>
+                </div>
+              )}
             </div>
 
-            {/* Settings Footer */}
-            <div className="p-5 border-t border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
-              <p className="text-xs text-slate-400">{tempCustomFields.length} custom field{tempCustomFields.length !== 1 ? 's' : ''} · {OPTIONAL_STANDARD_FIELDS.length - tempHiddenFields.length} of {OPTIONAL_STANDARD_FIELDS.length} standard fields visible</p>
+            <div className="px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-between gap-3 shrink-0">
+              <div className="text-xs text-zinc-400 font-medium">
+                Candidate ID: <span className="font-mono font-bold text-zinc-600 dark:text-zinc-300">{getCandidateId(viewCandidate)}</span>
+              </div>
               <div className="flex gap-3">
-                <button onClick={() => setIsSettingsOpen(false)} className="px-5 py-2.5 border border-slate-300 bg-white rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 transition">Cancel</button>
-                <button onClick={handleSaveSettings} disabled={isSavingSettings} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">
-                  {isSavingSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                  {isSavingSettings ? 'Saving…' : 'Save Settings'}
+                <button
+                  onClick={() => setIsViewDialogOpen(false)}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => { setIsViewDialogOpen(false); openEditDialog(viewCandidate); }}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/20 transition-all"
+                >
+                  Edit Details
                 </button>
               </div>
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
-      {/* ── Today Submissions Modal ── */}
+      {renderMatchingJobsModal()}
+
+      {viewingJobDetails && (
+        <JobDetailsModal
+          job={viewingJobDetails}
+          onClose={() => setViewingJobDetails(null)}
+        />
+      )}
+
       {isTodaySubOpen && (
         <AdminTodaySubmissionsModal
           candidates={candidates}
@@ -2577,281 +2772,103 @@ export default function AdminCandidates() {
           getCandidateId={getCandidateId}
         />
       )}
-
-      {/* ══════════════════════════════════════════════════════════════════════
-          BULK IMPORT PREVIEW MODAL
-      ══════════════════════════════════════════════════════════════════════ */}
-      {isImportModalOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
-
-            {/* Header */}
-            <div className="p-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                  <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-                  Import Candidates — Bulk Upload
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Supported: <span className="font-semibold">.xlsx, .xls, .csv</span>
-                </p>
-              </div>
-              <button
-                onClick={() => { resetImportState(); setIsImportModalOpen(false); }}
-                className="text-slate-400 hover:text-slate-700 font-bold text-2xl leading-none px-2"
-              >×</button>
-            </div>
-
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-
-              {/* Top action bar */}
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <button
-                  onClick={downloadCandidateTemplate}
-                  className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition"
-                >
-                  <Download className="w-4 h-4" /> Download Sample Template
-                </button>
-                {importParsedData && !isImporting && !importResult && (
-                  <button
-                    onClick={() => { setImportParsedData(null); setImportFileName(''); setImportParseProgress(0); if (importFileInputRef.current) importFileInputRef.current.value = ''; }}
-                    className="text-xs text-slate-500 hover:text-slate-700 underline transition"
-                  >
-                    Upload a different file
-                  </button>
-                )}
-              </div>
-
-              {/* Required fields info */}
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                <p className="text-xs font-bold text-blue-800 mb-2 uppercase tracking-wider">Required Columns (★) — all other Add Candidate fields are accepted in any order</p>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { label: 'First Name ★', hint: 'or "Full Name"' },
-                    { label: 'Email ★',      hint: '"Email Address", "E-Mail"' },
-                    { label: 'Phone ★',      hint: '"Mobile", "Contact" (10 digits)' },
-                    { label: 'Position ★',   hint: '"Role", "Job Title", "Designation"' },
-                  ].map(({ label, hint }) => (
-                    <div key={label} className="flex flex-col bg-white border border-blue-200 rounded-lg px-3 py-1.5 text-xs min-w-fit">
-                      <span className="font-semibold text-blue-800">{label}</span>
-                      <span className="text-blue-500">{hint}</span>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-[11px] text-blue-500 mt-2">
-                  Columns can be in <span className="font-semibold">any order</span>. Column names are matched automatically (fuzzy). Missing required fields will mark the row as invalid.
-                </p>
-              </div>
-
-              {/* Drag & drop zone — shown when no file parsed yet */}
-              {!importParsedData && !isParsing && (
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setImportDragOver(true); }}
-                  onDragLeave={() => setImportDragOver(false)}
-                  onDrop={handleImportDrop}
-                  onClick={() => importFileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${
-                    importDragOver
-                      ? 'border-emerald-500 bg-emerald-50 scale-[1.01]'
-                      : 'border-slate-300 hover:border-emerald-400 hover:bg-emerald-50/30'
-                  }`}
-                >
-                  <FileSpreadsheet className="h-12 w-12 text-slate-300 mx-auto mb-3" />
-                  <p className="font-semibold text-slate-600">
-                    {importDragOver ? 'Drop your file here!' : 'Drag & drop your Excel/CSV file here'}
-                  </p>
-                  <p className="text-sm text-slate-400 mt-1">or <span className="text-emerald-600 font-medium underline">click to browse</span></p>
-                  <p className="text-xs text-slate-400 mt-3">.xlsx · .xls · .csv</p>
-                </div>
-              )}
-
-              {/* Parse progress */}
-              {isParsing && (
-                <div className="space-y-2 py-6 text-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-emerald-600 mx-auto" />
-                  <p className="text-sm font-medium text-slate-600">Parsing {importFileName}…</p>
-                  <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mx-auto max-w-sm">
-                    <div className="h-2 bg-emerald-500 rounded-full transition-all duration-300" style={{ width: `${importParseProgress}%` }} />
-                  </div>
-                  <p className="text-xs text-slate-400">{importParseProgress}%</p>
-                </div>
-              )}
-
-              {/* Post-import result */}
-              {importResult && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {[
-                      { label: 'Total Rows',    value: importResult.totalRecords,          color: 'bg-slate-50 border-slate-200 text-slate-700' },
-                      { label: 'Imported',       value: importResult.importedSuccessfully,  color: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
-                      { label: 'Failed',         value: importResult.failedRecords,         color: 'bg-red-50 border-red-200 text-red-600' },
-                      { label: 'Duplicates',     value: importResult.duplicatesSkipped,     color: 'bg-amber-50 border-amber-200 text-amber-700' },
-                    ].map(({ label, value, color }) => (
-                      <div key={label} className={`border rounded-xl p-4 text-center ${color}`}>
-                        <p className="text-2xl font-bold">{value}</p>
-                        <p className="text-xs font-semibold uppercase tracking-wider mt-1 opacity-75">{label}</p>
-                      </div>
-                    ))}
-                  </div>
-                  {importResult.errors?.length > 0 && (
-                    <button
-                      onClick={handleDownloadErrorReport}
-                      className="flex items-center gap-2 text-sm font-medium text-red-600 hover:text-red-800 border border-red-200 bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg transition"
-                    >
-                      <Download className="w-4 h-4" /> Download Error Report ({importResult.errors.length} rows)
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Preview table */}
-              {importParsedData && !importResult && (
-                <div className="space-y-3">
-                  {/* Summary bar */}
-                  <div className="flex flex-wrap gap-2 text-sm">
-                    <span className="px-3 py-1 bg-slate-100 rounded-full font-medium text-slate-700">Total: {importParsedData.totalCount}</span>
-                    <span className="px-3 py-1 bg-emerald-100 rounded-full font-medium text-emerald-700">✓ Valid: {importParsedData.validRows.length}</span>
-                    <span className="px-3 py-1 bg-red-100 rounded-full font-medium text-red-600">✗ Invalid: {importParsedData.invalidRows.length}</span>
-                    {importFileName && <span className="px-3 py-1 bg-blue-50 rounded-full text-blue-600 text-xs">{importFileName}</span>}
-                  </div>
-
-                  <div className="overflow-auto rounded-xl border border-slate-200 max-h-80">
-                    <table className="w-full text-xs min-w-[700px]">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200">
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 w-10">#</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Name</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Email</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Phone</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Position</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Client</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {importParsedData.allRows.map((row, i) => (
-                          <tr
-                            key={i}
-                            className={`border-b last:border-0 ${row.valid ? 'bg-white hover:bg-emerald-50/30' : 'bg-red-50 hover:bg-red-100/40'}`}
-                          >
-                            <td className="px-3 py-2 text-slate-400">{row._rowNum || i + 1}</td>
-                            <td className="px-3 py-2 font-medium text-slate-800">{row.firstName} {row.lastName}</td>
-                            <td className="px-3 py-2 text-slate-600">{row.email}</td>
-                            <td className="px-3 py-2 text-slate-600">{row.contact}</td>
-                            <td className="px-3 py-2 text-slate-600">{row.position}</td>
-                            <td className="px-3 py-2 text-slate-600">{row.client}</td>
-                            <td className="px-3 py-2">
-                              {row.valid ? (
-                                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-semibold">Valid</span>
-                              ) : (
-                                <span className="text-red-600 font-medium" title={row.errors?.join('; ')}>
-                                  ✗ {row.errors?.[0]}
-                                  {row.errors?.length > 1 && <span className="text-red-400"> +{row.errors.length - 1} more</span>}
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-between items-center shrink-0 gap-3 flex-wrap">
-              <p className="text-xs text-slate-500">
-                {importParsedData && !importResult
-                  ? `${importParsedData.validRows.length} valid row(s) will be imported`
-                  : importResult
-                  ? `Import completed — ${importResult.importedSuccessfully} added to database`
-                  : 'Upload an Excel or CSV file to preview candidates before importing'}
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => { resetImportState(); setIsImportModalOpen(false); }}
-                  className="px-5 py-2 border border-slate-300 bg-white rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 transition"
-                >
-                  {importResult ? 'Close' : 'Cancel'}
-                </button>
-                {importParsedData && !importResult && (
-                  <button
-                    onClick={handleConfirmImport}
-                    disabled={isImporting || importParsedData.validRows.length === 0}
-                    className="flex items-center gap-2 px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
-                    {isImporting ? 'Importing…' : `Import ${importParsedData.validRows.length} Candidate(s)`}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// TODAY SUBMISSIONS MODAL
-// ══════════════════════════════════════════════════════════════════════════════
+// ── Admin Today Submissions Modal ─────────────────────────────────────────────
 function AdminTodaySubmissionsModal({ candidates, recruiters, onClose, getCandidateId }) {
   const todayStr = getSafeDate(new Date());
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [recruiterFilter, setRecruiterFilter] = useState('all');
 
-  const filtered = useMemo(() => candidates.filter((c) => {
-    const d = c.dateAdded || c.createdAt;
-    if (getSafeDate(d) !== selectedDate) return false;
-    if (recruiterFilter === 'all') return true;
-    const recId = typeof c.recruiterId === 'object' ? c.recruiterId?._id : c.recruiterId;
-    return String(recId) === String(recruiterFilter);
-  }), [candidates, selectedDate, recruiterFilter]);
+  const filtered = useMemo(() => {
+    return candidates.filter(c => {
+      const d = c.dateAdded || c.createdAt;
+      const dateMatch = getSafeDate(d) === selectedDate;
+      if (!dateMatch) return false;
 
-  const displayDate = selectedDate ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+      if (recruiterFilter === 'all') return true;
+      const recId = typeof c.recruiterId === 'object' ? c.recruiterId?._id : c.recruiterId;
+      return String(recId) === String(recruiterFilter);
+    });
+  }, [candidates, selectedDate, recruiterFilter]);
+
+  const displayDate = selectedDate
+    ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    : '';
 
   const getRecruiterDisplayName = (rec) => {
     if (!rec) return '-';
     if (typeof rec === 'object') return getRecruiterLabel(rec);
-    const found = recruiters.find((r) => r._id === rec || r.id === rec);
-    return found ? getRecruiterLabel(found) : '-';
+    const found = recruiters.find(r => r._id === rec || r.id === rec);
+    if (found) return getRecruiterLabel(found);
+    return '-';
   };
 
+  const selectedRecruiterName = recruiterFilter === 'all'
+    ? 'All Recruiters'
+    : getRecruiterDisplayName(recruiterFilter);
+
   return (
-    <div className="fixed inset-0 z-[50] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+    <ModalPortal>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[85vh] overflow-hidden flex flex-col">
         <div className="flex items-start justify-between px-6 pt-5 pb-3 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <Calendar className="h-5 w-5 text-violet-500" />
             <div>
               <h2 className="text-lg font-bold text-slate-900">Day Submissions</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Viewing candidates submitted on {displayDate}</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Viewing candidates submitted by {recruiterFilter === 'all' ? 'all recruiters' : selectedRecruiterName}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <select value={recruiterFilter} onChange={(e) => setRecruiterFilter(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400 text-slate-700 min-w-[150px]">
+            <select
+              value={recruiterFilter}
+              onChange={e => setRecruiterFilter(e.target.value)}
+              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400 text-slate-700 min-w-[150px]"
+            >
               <option value="all">All Recruiters</option>
-              {recruiters.map((r) => <option key={r._id || r.id} value={r._id || r.id}>{getRecruiterLabel(r)}</option>)}
+              {recruiters.map(r => (
+                <option key={r._id || r.id} value={r._id || r.id}>
+                  {getRecruiterLabel(r)}
+                </option>
+              ))}
             </select>
             <div className="flex items-center gap-1.5 border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 bg-white">
               <Calendar className="h-3.5 w-3.5 text-slate-400" />
-              <input type="date" value={selectedDate} max={todayStr} onChange={(e) => setSelectedDate(e.target.value)} className="border-none outline-none bg-transparent text-sm text-slate-700 cursor-pointer" />
+              <input
+                type="date"
+                value={selectedDate}
+                max={todayStr}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="border-none outline-none bg-transparent text-sm text-slate-700 cursor-pointer"
+              />
             </div>
-            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"><X className="h-5 w-5" /></button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
         </div>
+
         <div className="overflow-auto flex-1">
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-400">
               <Calendar className="h-12 w-12 mb-3 opacity-30" />
               <p className="text-sm font-medium">No submissions for {displayDate}</p>
+              {recruiterFilter !== 'all' && (
+                <p className="text-xs mt-1 text-slate-400">Try selecting "All Recruiters"</p>
+              )}
             </div>
           ) : (
-            <table className="w-full text-sm text-left border-collapse">
+            <div className="overflow-x-auto w-full">
+              <table className="w-full text-sm text-left border-collapse min-w-[800px]">
               <thead className="bg-slate-50 text-slate-500 text-xs font-semibold border-b sticky top-0 z-10">
                 <tr>
                   <th className="px-4 py-3 whitespace-nowrap">CANDIDATE ID</th>
@@ -2863,19 +2880,37 @@ function AdminTodaySubmissionsModal({ candidates, recruiters, onClose, getCandid
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.map((c) => {
+                {filtered.map(c => {
                   const statusArr = Array.isArray(c.status) ? c.status : [c.status || 'Submitted'];
                   return (
                     <tr key={c._id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs text-blue-600 font-bold whitespace-nowrap">{getCandidateId(c)}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">{c.name}</td>
-                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{getRecruiterDisplayName(c.recruiterId)}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-blue-600 font-bold whitespace-nowrap">
+                        {getCandidateId(c)}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <CandidateProfileLink candidate={c} className="text-slate-900">{c.name}</CandidateProfileLink>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                        <RecruiterDetailsTrigger recruiter={getCandidateRecruiterDetails(c, recruiters)} className="text-slate-600 font-medium">
+                          {getRecruiterDisplayName(c.recruiterId)}
+                        </RecruiterDetailsTrigger>
+                      </td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{c.position || '-'}</td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{c.client || '-'}</td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex flex-wrap gap-1">
-                          {statusArr.map((s) => (
-                            <span key={s} className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${s === 'Selected' || s === 'Joined' ? 'bg-green-100 text-green-800' : s === 'Rejected' || s === 'No Show' || s === 'Backout' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-800'}`}>{s}</span>
+                          {statusArr.map(s => (
+                            <span
+                              key={s}
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${s === 'Selected' || s === 'Joined'
+                                  ? 'bg-green-100 text-green-800'
+                                  : s === 'Rejected' || s === 'No Show' || s === 'Backout'
+                                    ? 'bg-red-100 text-red-700'
+                                    : 'bg-blue-100 text-blue-800'
+                                }`}
+                            >
+                              {s}
+                            </span>
                           ))}
                         </div>
                       </td>
@@ -2884,13 +2919,24 @@ function AdminTodaySubmissionsModal({ candidates, recruiters, onClose, getCandid
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
+
         <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-          <p className="text-xs text-slate-500">Showing <span className="font-semibold text-slate-700">{filtered.length}</span> submission{filtered.length !== 1 ? 's' : ''} for {displayDate}</p>
-          <button onClick={onClose} className="px-4 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 border border-slate-300 rounded-lg hover:bg-white transition-colors">Close Window</button>
+          <p className="text-xs text-slate-500">
+            Showing <span className="font-semibold text-slate-700">{filtered.length}</span> submission{filtered.length !== 1 ? 's' : ''} for {displayDate}
+            {recruiterFilter !== 'all' && <span className="ml-1">· <span className="font-medium text-violet-600">{selectedRecruiterName}</span></span>}
+          </p>
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 border border-slate-300 rounded-lg hover:bg-white transition-colors"
+          >
+            Close Window
+          </button>
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

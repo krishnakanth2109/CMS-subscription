@@ -61,6 +61,7 @@ const candidateSchema = mongoose.Schema({
     ],
     default: ['Submitted']
   },
+  statusChangedAt: { type: Date, default: () => new Date() },
 
   // ── Dynamic Tenant Fields ───────────────────────────────────────────────────
   customFields: { type: mongoose.Schema.Types.Mixed, default: {} },

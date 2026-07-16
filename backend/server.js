@@ -13,7 +13,6 @@ import fs               from 'fs';
 import { protect, authorize, getTenantOwnerId } from './middleware/authMiddleware.js';
 import Candidate from './models/Candidate.js';
 import User      from './models/User.js';
-
 // ── Route modules ─────────────────────────────────────────────────────────────
 import authRoutes      from './routes/authRoutes.js';
 import recruiterRoutes from './routes/recruiterRoutes.js';
@@ -39,6 +38,8 @@ import masterRoutes             from './routes/masterRoutes.js';
 import demoRequestRoutes        from './routes/demoRequestRoutes.js';
 import candidateQRRoutes       from './routes/candidateQRRoutes.js';
 import clientQRRoutes          from './routes/clientQRRoutes.js';
+import invoiceRoutes           from './routes/invoiceRoutes.js';
+import companyBankRoutes      from './routes/companyBankRoutes.js';
 
 // ── __dirname shim for ES Modules ─────────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
@@ -162,6 +163,8 @@ app.use('/api/score-match', scoreMatchRoutes);
 app.use('/api/demo-requests', demoRequestRoutes);
 app.use('/api/candidate-qr',  candidateQRRoutes);
 app.use('/api/client-qr',     clientQRRoutes);
+app.use('/api/invoices',      invoiceRoutes);
+app.use('/api/company-banks', companyBankRoutes);
 
 
 // Agreement module
@@ -189,6 +192,8 @@ app.use('/master',     masterRoutes);     // 🔹 FIXED: Added missing master fa
 app.use('/demo-requests', demoRequestRoutes);
 app.use('/candidate-qr',  candidateQRRoutes);
 app.use('/client-qr',     clientQRRoutes);
+app.use('/invoices',      invoiceRoutes);
+app.use('/company-banks', companyBankRoutes);
 
 app.use('/',           aiMockRoutes);
 

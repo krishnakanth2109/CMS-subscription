@@ -204,35 +204,14 @@ export default function Register() {
       // 1. Register account (Firebase + MongoDB)
       await registerAccount();
 
-      if (selectedPlan === 'Basic') {
-        // Free trial — no payment needed, go to login
-        setSuccess(true);
-        setTimeout(() => navigate('/login'), 2000);
-        return;
-      }
-
-      // 2. Create Razorpay order via PUBLIC endpoint (no auth token required)
-      const orderData = await createGuestOrder();
-
-      // 3. Open Razorpay checkout and wait for user to complete payment
-      const paymentResponse = await openRazorpayCheckout(orderData);
-
-      // 4. Verify payment via PUBLIC endpoint — upgrades plan in MongoDB by email
-      await verifyGuestPayment(paymentResponse);
-
-      // 5. All done!
+      // Bypass payment: treat everything as successful and immediately redirect to login!
       setSuccess(true);
       setTimeout(() => navigate('/login'), 2000);
+      return;
 
     } catch (err) {
       console.error('Registration Error:', err);
-      // If payment was cancelled but account was created, account still works
-      if (err.message?.includes('Payment cancelled')) {
-        setError(err.message); // Show "log in and upgrade anytime" message
-        setTimeout(() => navigate('/login'), 3500);
-      } else {
-        setError(err.message || 'Something went wrong. Please try again.');
-      }
+      setError(err.message || 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }

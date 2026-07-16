@@ -1,4 +1,3 @@
-// --- START OF FILE recruiterController.js ---
 import User from '../models/User.js';
 import { admin, getTenantOwnerId } from '../middleware/authMiddleware.js';
 import { v2 as cloudinary } from 'cloudinary';
@@ -261,7 +260,6 @@ export const createRecruiter = async (req, res) => {
       username:       username || email.split('@')[0],
       profilePicture: profilePicture || '',
       active:         true,
-      // ── Crucial: stamp this user with the manager's tenantOwnerId ─────────
       tenantOwnerId,
     });
 
@@ -276,7 +274,7 @@ export const createRecruiter = async (req, res) => {
       tenantOwnerId: user.tenantOwnerId,
     });
 
-    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5174').replace(/\/$/, '');
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
 
     // Send welcome email in background
     sendBrevoEmail({
@@ -340,8 +338,21 @@ export const updateRecruiter = async (req, res) => {
       if (emailExists) return res.status(400).json({ message: 'Email already exists' });
     }
 
+    // Resolve firebaseUid if missing
+    let fbUid = user.firebaseUid;
+    if (!fbUid) {
+      try {
+        const fbUser = await admin.auth().getUserByEmail(user.email);
+        fbUid = fbUser.uid;
+        user.firebaseUid = fbUid;
+        await user.save();
+      } catch (err) {
+        console.error('Failed to resolve Firebase UID by email:', err.message);
+      }
+    }
+
     // Sync changes to Firebase Auth
-    if (user.firebaseUid) {
+    if (fbUid) {
       const fbUpdates = {};
       if (req.body.password) fbUpdates.password = req.body.password;
       if (req.body.email && req.body.email !== user.email) fbUpdates.email = req.body.email;
@@ -349,8 +360,42 @@ export const updateRecruiter = async (req, res) => {
         fbUpdates.displayName = `${req.body.firstName || user.firstName} ${req.body.lastName || user.lastName}`.trim();
       }
       if (Object.keys(fbUpdates).length > 0) {
-        try { await admin.auth().updateUser(user.firebaseUid, fbUpdates); }
-        catch (e) { console.error('Firebase admin update error (non-fatal):', e.message); }
+        try {
+          await admin.auth().updateUser(fbUid, fbUpdates);
+        } catch (e) {
+          if (e.code === 'auth/user-not-found' || String(e.message || '').includes('no user record')) {
+            // Self-heal: Create Firebase Auth record if missing/stale
+            try {
+              const newFbUser = await admin.auth().createUser({
+                email: req.body.email || user.email,
+                password: req.body.password || 'temp123456',
+                displayName: `${req.body.firstName || user.firstName} ${req.body.lastName || user.lastName}`.trim(),
+              });
+              user.firebaseUid = newFbUser.uid;
+              await user.save();
+            } catch (createErr) {
+              console.error('Failed to self-heal user in Firebase:', createErr.message);
+              return res.status(400).json({ message: `Firebase auto-creation failed: ${createErr.message}` });
+            }
+          } else {
+            console.error('Firebase admin update error:', e.message);
+            return res.status(400).json({ message: `Firebase update failed: ${e.message}` });
+          }
+        }
+      }
+    } else {
+      // Auto-create in Firebase Auth if there is absolutely no record link
+      try {
+        const newFbUser = await admin.auth().createUser({
+          email: req.body.email || user.email,
+          password: req.body.password || 'temp123456',
+          displayName: `${req.body.firstName || user.firstName} ${req.body.lastName || user.lastName}`.trim(),
+        });
+        user.firebaseUid = newFbUser.uid;
+        await user.save();
+      } catch (createErr) {
+        console.error('Failed to register user in Firebase:', createErr.message);
+        return res.status(400).json({ message: `Firebase auto-registration failed: ${createErr.message}` });
       }
     }
 

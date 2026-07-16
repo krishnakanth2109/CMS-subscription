@@ -52,48 +52,29 @@ export function ScoreBadge({ score }) {
 
 // ── MatchBreakdownBar ─────────────────────────────────────────────────────────
 export function MatchBreakdownBar({ breakdown }) {
-  if (!breakdown) return null;
-
-  const labels = {
-    mandatorySkills: 'Mandatory Skills',
-    preferredSkills: 'Preferred Skills',
-    skills: 'Skills',
-    experience: 'Experience',
-    role: 'Role',
-    education: 'Education',
-    qualification: 'Education',
-    location: 'Location',
-  };
-  const maxes = {
-    mandatorySkills: 40,
-    preferredSkills: 10,
-    skills: 50,
-    experience: 25,
-    role: 10,
-    education: 10,
-    qualification: 10,
-    location: 5,
-  };
+  const items = [
+    { label: 'Skills (55)', value: breakdown?.skills || 0, max: 55, color: 'bg-blue-500' },
+    { label: 'Role Relevance (25)', value: breakdown?.role || 0, max: 25, color: 'bg-indigo-500' },
+    { label: 'Experience (10)', value: breakdown?.experience || 0, max: 10, color: 'bg-teal-500' },
+    { label: 'Education (5)', value: breakdown?.education || 0, max: 5, color: 'bg-purple-500' },
+    { label: 'Location/Other (5)', value: breakdown?.location || 0, max: 5, color: 'bg-pink-500' },
+  ];
 
   return (
-    <div className="space-y-2.5 mt-4">
-      {Object.entries(breakdown).map(([k, v]) => {
-        const maxScore = Number(maxes[k]) || 0;
-        const currentScore = Number(v) || 0;
-        const percent = maxScore > 0 ? Math.round((currentScore / maxScore) * 100) : 0;
-        const barPercent = Math.min(Math.max(percent, 0), 100);
-        let color = 'bg-red-500';
-        if (percent >= 80) color = 'bg-green-500';
-        else if (percent >= 50) color = 'bg-blue-500';
-        else if (percent >= 30) color = 'bg-yellow-500';
-
+    <div className="space-y-2.5 mt-3">
+      {items.map((item) => {
+        const percentage = item.max ? Math.round((item.value / item.max) * 100) : 0;
         return (
-          <div key={k} className="flex items-center text-sm">
-            <span className="w-32 text-zinc-500 dark:text-zinc-400 text-xs font-medium truncate">{labels[k] || k}</span>
-            <div className="flex-1 mx-3 bg-zinc-200 dark:bg-zinc-700 h-2 rounded-full overflow-hidden">
-              <div className={`h-full ${color} transition-all duration-500`} style={{ width: `${barPercent}%` }} />
+          <div key={item.label} className="text-xs">
+            <div className="flex justify-between text-zinc-500 mb-1 font-medium">
+              <span>{item.label}</span>
+              <span className="font-semibold text-zinc-800 dark:text-zinc-100">
+                {percentage}%
+              </span>
             </div>
-            <span className="w-10 text-right text-xs font-semibold text-zinc-700 dark:text-zinc-300">{percent}%</span>
+            <div className="w-full bg-zinc-200 dark:bg-zinc-800 rounded-full h-1.5">
+              <div className={`${item.color} h-1.5 rounded-full`} style={{ width: `${Math.min(percentage, 100)}%` }} />
+            </div>
           </div>
         );
       })}
@@ -103,43 +84,49 @@ export function MatchBreakdownBar({ breakdown }) {
 
 // ── SkillChips ────────────────────────────────────────────────────────────────
 export function SkillChips({
-  matched = [],
-  missing = [],
   matchedMandatory = [],
   missingMandatory = [],
   matchedPreferred = [],
   missingPreferred = [],
 }) {
-  const hasAtsSkills = matchedMandatory.length > 0 || missingMandatory.length > 0 || matchedPreferred.length > 0 || missingPreferred.length > 0;
-  if (!hasAtsSkills && matched.length === 0 && missing.length === 0) return null;
-  const groups = hasAtsSkills
-    ? [
-        { label: 'Matched Mandatory Skills', items: matchedMandatory, className: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border-green-200 dark:border-green-800' },
-        { label: 'Missing Mandatory Skills', items: missingMandatory, className: 'bg-white text-red-600 border-red-200 dark:bg-zinc-900 dark:border-red-900/50 dark:text-red-400' },
-        { label: 'Matched Preferred Skills', items: matchedPreferred, className: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 border-blue-200 dark:border-blue-800' },
-        { label: 'Missing Preferred Skills', items: missingPreferred, className: 'bg-white text-amber-600 border-amber-200 dark:bg-zinc-900 dark:border-amber-900/50 dark:text-amber-400' },
-      ]
-    : [
-        { label: 'Matched Skills', items: matched, className: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border-green-200 dark:border-green-800' },
-        { label: 'Missing Skills', items: missing, className: 'bg-white text-red-600 border-red-200 dark:bg-zinc-900 dark:border-red-900/50 dark:text-red-400' },
-      ];
-
   return (
-    <div className="mt-5 space-y-3">
-      {groups.filter(group => group.items.length > 0).map(group => (
-        <div key={group.label}>
-          <span className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
-            {group.label}
-          </span>
+    <div className="space-y-3">
+      <div>
+        <div className="text-xs font-bold text-zinc-400 mb-1.5 uppercase tracking-wide">Mandatory Skills</div>
+        <div className="flex flex-wrap gap-1.5">
+          {matchedMandatory.map((skill) => (
+            <span key={`matched-${skill}`} className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-2 py-0.5 rounded-md font-medium">
+              {skill} (Match)
+            </span>
+          ))}
+          {missingMandatory.map((skill) => (
+            <span key={`missing-${skill}`} className="bg-red-50 text-red-600 border border-red-200 text-xs px-2 py-0.5 rounded-md font-medium">
+              {skill} (Missing)
+            </span>
+          ))}
+          {!matchedMandatory.length && !missingMandatory.length && (
+            <span className="text-xs text-zinc-400">No mandatory skills listed.</span>
+          )}
+        </div>
+      </div>
+
+      {(matchedPreferred.length > 0 || missingPreferred.length > 0) && (
+        <div>
+          <div className="text-xs font-bold text-zinc-400 mb-1.5 uppercase tracking-wide">Preferred Skills</div>
           <div className="flex flex-wrap gap-1.5">
-            {group.items.map(s => (
-              <span key={`${group.label}-${s}`} className={`px-2 py-1 border rounded text-xs font-medium ${group.className}`}>
-                {s}
+            {matchedPreferred.map((skill) => (
+              <span key={`pref-matched-${skill}`} className="bg-blue-50 text-blue-700 border border-blue-200 text-xs px-2 py-0.5 rounded-md font-medium">
+                {skill} (Match)
+              </span>
+            ))}
+            {missingPreferred.map((skill) => (
+              <span key={`pref-missing-${skill}`} className="bg-zinc-100 text-zinc-500 border border-zinc-200 text-xs px-2 py-0.5 rounded-md font-medium">
+                {skill}
               </span>
             ))}
           </div>
         </div>
-      ))}
+      )}
     </div>
   );
 }

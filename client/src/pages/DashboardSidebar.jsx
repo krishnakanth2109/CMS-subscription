@@ -38,7 +38,7 @@ export function DashboardSidebar({ collapsed, onToggle }) {
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const links = userRole === 'admin' ? adminLinks : recruiterLinks;
+  const links = (userRole === 'admin' || userRole === 'manager') ? adminLinks : recruiterLinks;
 
   const handleLogout = () => {
     logout();

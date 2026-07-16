@@ -46,7 +46,7 @@ export const updateCandidateStatus = async (req, res) => {
 
     const updated = await Candidate.findByIdAndUpdate(
       req.params.id,
-      { $set: { status: newStatus, updatedBy: req.user._id } },
+      { $set: { status: newStatus, statusChangedAt: new Date(), updatedBy: req.user._id } },
       { new: true, runValidators: false }
     );
 
@@ -118,8 +118,10 @@ export const inlineUpdateCandidate = async (req, res) => {
 
     if (status) {
       updateData.status = status;
+      updateData.statusChangedAt = new Date();
     } else if (level && outcome) {
       updateData.status = `${level} - ${outcome}`;
+      updateData.statusChangedAt = new Date();
     }
 
     if (remarks !== undefined) updateData.remarks = remarks;

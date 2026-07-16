@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb';
 import { getAgreementDB as getDB } from '../config/agreementDatabase.js';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
+import Client from '../models/Client.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -51,13 +52,57 @@ function sanitizeDoc(doc) {
     return doc;
 }
 
+async function syncCompanyToClient(companyDoc) {
+    try {
+        const name = companyDoc.name;
+        const email = companyDoc.email;
+        if (!name && !email) return;
+
+        const pct = companyDoc.compensation?.percentage || companyDoc.percentage || 0;
+
+        const lockingPeriod = companyDoc.invoice_post_joining || '0';
+
+        const updateFields = {
+            companyName: name,
+            email: email,
+            percentage: String(pct),
+            address: companyDoc.address || '',
+            replacementPeriod: companyDoc.replacement || '',
+            paymentMode: companyDoc.payment_release || '',
+            lockingPeriod: String(lockingPeriod),
+            tenantOwnerId: companyDoc.tenantOwnerId,
+        };
+
+        const client = await Client.findOne({ 
+            tenantOwnerId: companyDoc.tenantOwnerId, 
+            $or: [{ email: email }, { companyName: name }] 
+        });
+
+        if (client) {
+            await Client.findByIdAndUpdate(client._id, updateFields);
+        } else {
+            const count = await Client.countDocuments({ tenantOwnerId: companyDoc.tenantOwnerId });
+            const clientId = `CL${(1000 + count + 1)}`;
+            await Client.create({
+                ...updateFields,
+                clientId
+            });
+        }
+    } catch (err) {
+        console.error('Failed to sync agreement company to main Client:', err.message);
+    }
+}
+
 // ── POST / — Create Company ──
 router.post('/', async (req, res) => {
     try {
         const db = getDB();
         const body = req.body;
 
-        const existing = await db.collection('companies').findOne({ email: body.email, tenantOwnerId: String(req.tenantId) });
+        const existing = await db.collection('companies').findOne({ 
+            email: body.email, 
+            tenantOwnerId: String(req.tenantId) 
+        });
         if (existing) {
             return res.status(400).json({ detail: 'Email already registered' });
         }
@@ -66,26 +111,27 @@ router.post('/', async (req, res) => {
         const compData = { ...body };
         delete compData.percentage;
 
-        // Convert joining_date string to Date
         if (compData.joining_date && typeof compData.joining_date === 'string') {
             compData.joining_date = new Date(compData.joining_date);
         }
 
-        // Auto-generate emp_id if not provided
         if (!compData.emp_id) {
-            const count = await db.collection('companies').countDocuments();
+            const count = await db.collection('companies').countDocuments({ tenantOwnerId: String(req.tenantId) });
             compData.emp_id = `EMP${String(count + 1).padStart(3, '0')}`;
         }
 
         const newDoc = {
             ...compData,
             status: 'Pending',
+            created_at: new Date(),
             compensation: { percentage: parseFloat(percentage) },
             tenantOwnerId: String(req.tenantId)
         };
 
         const result = await db.collection('companies').insertOne(newDoc);
         newDoc._id = result.insertedId;
+
+        await syncCompanyToClient(newDoc);
 
         res.status(201).json(fixId(newDoc));
     } catch (err) {
@@ -101,7 +147,12 @@ router.get('/', async (req, res) => {
         const skip = parseInt(req.query.skip) || 0;
         const limit = parseInt(req.query.limit) || 100;
 
-        const cursor = db.collection('companies').find({ tenantOwnerId: String(req.tenantId) }).skip(skip).limit(limit);
+        const cursor = db.collection('companies')
+            .find({ tenantOwnerId: String(req.tenantId) })
+            .sort({ _id: -1 })
+            .skip(skip)
+            .limit(limit);
+            
         const companies = [];
         for await (const doc of cursor) {
             companies.push(sanitizeDoc(fixId(doc)));
@@ -143,7 +194,10 @@ router.get('/:id', async (req, res) => {
             return res.status(400).json({ detail: 'Invalid ObjectId' });
         }
 
-        const company = await db.collection('companies').findOne({ _id: new ObjectId(id), tenantOwnerId: String(req.tenantId) });
+        const company = await db.collection('companies').findOne({ 
+            _id: new ObjectId(id),
+            tenantOwnerId: String(req.tenantId)
+        });
         if (!company) {
             return res.status(404).json({ detail: 'Company not found' });
         }
@@ -164,13 +218,37 @@ router.delete('/:id', async (req, res) => {
             return res.status(400).json({ detail: 'Invalid ObjectId' });
         }
 
-        const result = await db.collection('companies').deleteOne({ _id: new ObjectId(id), tenantOwnerId: String(req.tenantId) });
+        const existing = await db.collection('companies').findOne({ 
+            _id: new ObjectId(id),
+            tenantOwnerId: String(req.tenantId)
+        });
+        if (!existing) {
+            return res.status(404).json({ detail: 'Company not found' });
+        }
+
+        const result = await db.collection('companies').deleteOne({ 
+            _id: new ObjectId(id),
+            tenantOwnerId: String(req.tenantId)
+        });
         if (result.deletedCount === 0) {
             return res.status(404).json({ detail: 'Company not found' });
         }
 
         // Also delete generated agreements for this company
-        await db.collection('generated_agreements').deleteMany({ employee_id: new ObjectId(id) });
+        await db.collection('generated_agreements').deleteMany({ 
+            employee_id: new ObjectId(id),
+            tenantOwnerId: String(req.tenantId)
+        });
+
+        // Synchronize deletion to main Clients
+        try {
+            await Client.deleteOne({ 
+                tenantOwnerId: String(req.tenantId),
+                $or: [{ email: existing.email }, { companyName: existing.name }] 
+            });
+        } catch (e) {
+            console.error('Failed to sync deletion to main Client:', e.message);
+        }
 
         res.status(204).send();
     } catch (err) {
@@ -188,7 +266,10 @@ router.put('/:id', async (req, res) => {
             return res.status(400).json({ detail: `Invalid ObjectId: '${id}'` });
         }
 
-        const existing = await db.collection('companies').findOne({ _id: new ObjectId(id), tenantOwnerId: String(req.tenantId) });
+        const existing = await db.collection('companies').findOne({ 
+            _id: new ObjectId(id),
+            tenantOwnerId: String(req.tenantId)
+        });
         if (!existing) {
             return res.status(404).json({ detail: 'Company not found' });
         }
@@ -197,7 +278,6 @@ router.put('/:id', async (req, res) => {
         const newPercentage = updateData.percentage;
         delete updateData.percentage;
 
-        // Convert joining_date string to Date
         if (updateData.joining_date && typeof updateData.joining_date === 'string') {
             updateData.joining_date = new Date(updateData.joining_date);
         }
@@ -211,7 +291,12 @@ router.put('/:id', async (req, res) => {
             { $set: updateData }
         );
 
-        const updatedDoc = await db.collection('companies').findOne({ _id: new ObjectId(id) });
+        const updatedDoc = await db.collection('companies').findOne({ 
+            _id: new ObjectId(id),
+            tenantOwnerId: String(req.tenantId)
+        });
+        await syncCompanyToClient(updatedDoc);
+
         res.json(fixId(updatedDoc));
     } catch (err) {
         res.status(500).json({ detail: err.message });
@@ -232,7 +317,6 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rawData = XLSX.utils.sheet_to_json(ws, { defval: null });
 
-        // Normalize column names
         const data = rawData.map(row => {
             const normalized = {};
             for (const [key, val] of Object.entries(row)) {
@@ -261,7 +345,10 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                     continue;
                 }
 
-                const existing = await db.collection('companies').findOne({ email: email, tenantOwnerId: String(req.tenantId) });
+                const existing = await db.collection('companies').findOne({ 
+                    email: email,
+                    tenantOwnerId: String(req.tenantId)
+                });
                 if (existing) {
                     errors.push(`Skipped ${email}: Exists`);
                     continue;
@@ -280,7 +367,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
                 let empId = findCol(row, ['emp_id', 'partner_id']);
                 if (!empId) {
-                    const count = await db.collection('companies').countDocuments();
+                    const count = await db.collection('companies').countDocuments({ tenantOwnerId: String(req.tenantId) });
                     empId = `EMP${String(count + 1 + successCount).padStart(3, '0')}`;
                 }
 
@@ -311,6 +398,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                 };
 
                 await db.collection('companies').insertOne(doc);
+                await syncCompanyToClient(doc);
                 successCount++;
             } catch (e) {
                 errors.push(`Row ${i + 2}: ${e.message}`);

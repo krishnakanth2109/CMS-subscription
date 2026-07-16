@@ -1,18 +1,22 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Users, UserCheck, TrendingUp, PauseCircle, UserX, User,
-  ClipboardList, Briefcase, X, Calendar, Plus, ChevronDown
+  ClipboardList, Briefcase, X, Calendar, Plus,
+  ArrowUpDown, ArrowUp, ArrowDown, Search
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Cell,
-  LineChart, Line
+  Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
 import clsx from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { format } from 'date-fns';
+import CandidateProfileLink from '@/components/CandidateProfileLink';
+import RecruiterPerformanceModal from '@/components/RecruiterPerformanceModal';
+import { RecruiterDetailsTrigger } from '@/components/RecruiterDetailsModal';
+import RecruiterCandidateGrowthChart from '@/components/RecruiterCandidateGrowthChart';
 
 // ─── API Helpers ──────────────────────────────────────────────────────────────
 // FIX 1: Computed ONCE at module level — not re-computed on every render/call.
@@ -42,9 +46,44 @@ async function apiFetch(path) {
 // ─── Status Helper — defined OUTSIDE component so it is never re-created ─────
 // FIX 4: Moved out of component body → no new function reference on each render.
 const getSafeStatus = (s) => {
-  if (Array.isArray(s)) return String(s[s.length - 1] || '').toLowerCase();
-  return String(s || '').toLowerCase();
+  if (Array.isArray(s)) return String(s[0] || '').trim().toLowerCase();
+  return String(s || '').trim().toLowerCase();
 };
+
+const getCandidateRecruiterId = (candidate) => {
+  const rec = candidate.recruiterId;
+  if (!rec) return '';
+  if (typeof rec === 'object') return String(rec._id || rec.id || '');
+  return String(rec);
+};
+
+const getRecruiterName = (recruiter = {}) => (
+  recruiter.name ||
+  `${recruiter.firstName || ''} ${recruiter.lastName || ''}`.trim() ||
+  recruiter.username ||
+  recruiter.email ||
+  'Unnamed Recruiter'
+);
+
+const statusMatchesMetric = (candidate, metric) => {
+  // status may be a plain string or [String] array — normalise to string
+  const statusVal = candidate.status;
+  const statusStr = Array.isArray(statusVal)
+    ? String(statusVal[statusVal.length - 1] || '').trim().toLowerCase()
+    : String(statusVal || '').trim().toLowerCase();
+
+  if (metric === 'submissions') return true;
+  if (metric === 'pending') return ['submitted', 'pending', 'pipeline'].includes(statusStr);
+  return statusStr === metric.toLowerCase();
+};
+
+const RECRUITER_PERFORMANCE_COLUMNS = [
+  { key: 'submissions', label: 'Submissions', className: 'text-blue-600 font-black' },
+  { key: 'hold', label: 'Hold', className: 'text-orange-400 font-bold' },
+  { key: 'joined', label: 'Joined', className: 'text-green-600 font-black' },
+  { key: 'rejected', label: 'Rejected', className: 'text-red-500 font-medium' },
+  { key: 'pending', label: 'Pending', className: 'text-gray-500 font-medium' },
+];
 
 // ─── REUSABLE CARD COMPONENTS ─────────────────────────────────────────────────
 // FIX 5: Both card components are defined outside the parent component.
@@ -52,7 +91,7 @@ const getSafeStatus = (s) => {
 //        remount them on every render of the parent — very expensive for tables
 //        and grids with many cards.
 
-const PrimaryStatCard = React.memo(({ title, value, trend, icon: Icon, onClick }) => (
+const PrimaryStatCard = React.memo(({ title, value, trend = 0, progress = 0, icon: Icon, onClick }) => (
   <div
     onClick={onClick}
     className="relative overflow-hidden bg-[#3530a0] rounded-[1.5rem] p-6 text-white shadow-lg h-44 flex flex-col justify-between cursor-pointer"
@@ -67,12 +106,20 @@ const PrimaryStatCard = React.memo(({ title, value, trend, icon: Icon, onClick }
       </div>
     </div>
     <div className="relative z-10 mt-auto">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="bg-green-500 text-white px-2 py-0.5 rounded text-[10px] font-bold">+{trend}%</span>
-        <span className="text-[10px] opacity-70">vs last month</span>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2">
+          <span className={clsx(
+            'px-2 py-0.5 rounded text-[10px] font-bold text-white',
+            trend >= 0 ? 'bg-green-500' : 'bg-red-500'
+          )}>
+            {trend >= 0 ? '+' : ''}{trend}%
+          </span>
+          <span className="text-[10px] opacity-70">vs last month</span>
+        </div>
+        <span className="text-[10px] font-bold text-white/80">{progress}%</span>
       </div>
       <div className="h-1.5 w-full bg-black/20 rounded-full overflow-hidden">
-        <div className="h-full bg-blue-400 rounded-full w-2/5" />
+        <div className="h-full bg-blue-400 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
       </div>
     </div>
     <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 pointer-events-none" />
@@ -88,7 +135,7 @@ const BUBBLE_THEMES = {
 };
 
 // FIX 6: Theme map is module-level constant — not re-created inside the component on every render.
-const BubbleStatCard = React.memo(({ title, value, trend, icon: Icon, theme = 'blue', onClick }) => {
+const BubbleStatCard = React.memo(({ title, value, trend = 0, progress = 0, icon: Icon, theme = 'blue', onClick }) => {
   const t = BUBBLE_THEMES[theme] || BUBBLE_THEMES.blue;
   return (
     <div
@@ -106,12 +153,20 @@ const BubbleStatCard = React.memo(({ title, value, trend, icon: Icon, theme = 'b
         </div>
       </div>
       <div className="relative z-10 mt-auto">
-        <div className="flex items-center gap-2 mb-2">
-          <span className={clsx('px-2 py-0.5 rounded text-[10px] font-bold text-white', t.badge)}>+{trend}%</span>
-          <span className="text-[10px] text-gray-400">vs last month</span>
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center gap-2">
+            <span className={clsx(
+              'px-2 py-0.5 rounded text-[10px] font-bold text-white',
+              trend >= 0 ? t.badge : 'bg-red-500'
+            )}>
+              {trend >= 0 ? '+' : ''}{trend}%
+            </span>
+            <span className="text-[10px] text-gray-400">vs last month</span>
+          </div>
+          <span className="text-[10px] font-bold text-gray-500">{progress}%</span>
         </div>
         <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
-          <div className={clsx('h-full rounded-full w-2/5', t.bar)} />
+          <div className={clsx('h-full rounded-full transition-all duration-500', t.bar)} style={{ width: `${progress}%` }} />
         </div>
       </div>
     </div>
@@ -119,21 +174,24 @@ const BubbleStatCard = React.memo(({ title, value, trend, icon: Icon, theme = 'b
 });
 
 // ─── Loading Spinner ───────────────────────────────────────────────────────────
+const RecruiterMetricButton = ({ value, className, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={clsx(
+      'inline-flex min-w-6 justify-center rounded-sm underline-offset-4 transition hover:underline focus:outline-none focus:ring-2 focus:ring-blue-200',
+      className
+    )}
+  >
+    {value}
+  </button>
+);
+
 const FullPageSpinner = () => (
   <div className="flex h-screen w-full items-center justify-center bg-[#f3f6fd]">
     <div className="animate-spin h-12 w-12 border-4 border-[#283086] border-t-transparent rounded-full" />
   </div>
 );
-
-// Helper to safely get candidate's recruiter name
-const getRecruiterNameOfCandidate = (c) => {
-  const rec = c.recruiterId;
-  if (!rec) return 'Unknown';
-  if (typeof rec === 'object') {
-    return `${rec.firstName || rec.name || ''} ${rec.lastName || ''}`.trim() || rec.username || 'Unknown';
-  }
-  return 'Unknown';
-};
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function AdminDashboard() {
@@ -150,21 +208,14 @@ export default function AdminDashboard() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalData, setModalData] = useState([]);
   const [modalLoading, setModalLoading] = useState(false);
+  const [performanceModal, setPerformanceModal] = useState(null);
   const [filterDate, setFilterDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [recruiterFilter, setRecruiterFilter] = useState('All');
-  const [performanceModal, setPerformanceModal] = useState(null);
-
-  const RECRUITER_NAMES = useMemo(() => {
-    const names = recruiters
-      .map(r => r.name || `${r.firstName || ''} ${r.lastName || ''}`.trim() || r.username)
-      .filter(Boolean);
-    return ['All', ...Array.from(new Set(names)).sort()];
-  }, [recruiters]);
-
-  const globalFilteredCandidates = useMemo(() => {
-    if (recruiterFilter === 'All') return candidates;
-    return candidates.filter(c => getRecruiterNameOfCandidate(c) === recruiterFilter);
-  }, [candidates, recruiterFilter]);
+  const [sortField, setSortField] = useState('submissions');
+  const [sortOrder, setSortOrder] = useState('desc');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [tableStartDate, setTableStartDate] = useState('');
+  const [tableEndDate, setTableEndDate] = useState('');
 
   // ── FIX 7: Initial fetch — all 4 endpoints in parallel, settled so a single
   //    slow/failing endpoint never blocks the others from painting data. ────────
@@ -174,12 +225,9 @@ export default function AdminDashboard() {
     const fetchData = async () => {
       try {
         const [candR, recR, jobsR] = await Promise.allSettled([
-          apiFetch('/candidates'),
-          apiFetch('/recruiters'),
-          apiFetch('/jobs'),
-          // FIX 9: Removed /clients fetch — clients.length was fetched but
-          // the "Total Clients" card was replaced with "Today Submissions".
-          // Fetching unused data wastes bandwidth and delays the dashboard.
+          apiFetch('/candidates?view=dashboard'),
+          apiFetch('/recruiters?view=lookup'),
+          apiFetch('/jobs?view=dashboard'),
         ]);
         if (cancelled) return;
         if (candR.status === 'fulfilled') setCandidates(candR.value);
@@ -201,7 +249,7 @@ export default function AdminDashboard() {
   const fetchModalData = useCallback(async () => {
     setModalLoading(true);
     try {
-      const data = await apiFetch(`/candidates?date=${filterDate}`);
+      const data = await apiFetch(`/candidates?view=dashboard&date=${filterDate}`);
       setModalData(data);
     } catch {
       toast({ title: 'Error', description: 'Failed to fetch day submissions', variant: 'destructive' });
@@ -213,227 +261,314 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (isModalOpen) fetchModalData();
   }, [isModalOpen, fetchModalData]);
-  // FIX 11: Removed `filterDate` from useEffect deps — fetchModalData already
-  // re-creates when filterDate changes, which triggers this effect correctly.
-  // The old code had [isModalOpen, filterDate, toast] which caused double-fetches.
 
   // ── Computed stats — all useMemo with correct minimal dep arrays ─────────────
+  const recruiterOptions = useMemo(() => (
+    recruiters
+      .filter(r => r._id || r.id)
+      .map(r => ({ id: String(r._id || r.id), name: getRecruiterName(r) }))
+      .filter(r => r.name.trim() !== '')
+      .sort((a, b) => a.name.localeCompare(b.name))
+  ), [recruiters]);
+
+  const selectedRecruiterName = useMemo(() => {
+    if (recruiterFilter === 'All') return 'all recruiters';
+    return recruiterOptions.find(r => r.id === recruiterFilter)?.name || 'selected recruiter';
+  }, [recruiterFilter, recruiterOptions]);
+
+  const scopedCandidates = useMemo(() => (
+    recruiterFilter === 'All'
+      ? candidates
+      : candidates.filter(c => getCandidateRecruiterId(c) === recruiterFilter)
+  ), [candidates, recruiterFilter]);
+
+  const visibleRecruiters = useMemo(() => (
+    recruiterFilter === 'All'
+      ? recruiters
+      : recruiters.filter(r => String(r._id || r.id || '') === recruiterFilter)
+  ), [recruiters, recruiterFilter]);
+
+  const hasStatus = useCallback((c, targetStatus) => {
+    const statusVal = c.status;
+    const statusStr = Array.isArray(statusVal)
+      ? String(statusVal[statusVal.length - 1] || '').trim().toLowerCase()
+      : String(statusVal || '').trim().toLowerCase();
+    const targets = Array.isArray(targetStatus)
+      ? targetStatus.map(t => String(t || '').trim().toLowerCase())
+      : [String(targetStatus || '').trim().toLowerCase()];
+    return targets.includes(statusStr);
+  }, []);
+
   const stats = useMemo(() => {
-    const total = globalFilteredCandidates.length;
-    const submitted = globalFilteredCandidates.filter(c => { const s = getSafeStatus(c.status); return s === 'submitted' || s === 'pending'; }).length;
-    const joined = globalFilteredCandidates.filter(c => getSafeStatus(c.status) === 'joined').length;
-    const hold = globalFilteredCandidates.filter(c => getSafeStatus(c.status) === 'hold').length;
-    const rejected = globalFilteredCandidates.filter(c => getSafeStatus(c.status) === 'rejected').length;
+    const total = scopedCandidates.length;
+    const submitted = scopedCandidates.filter(c => hasStatus(c, ['Submitted', 'Pending', 'Pipeline'])).length;
+    const joined = scopedCandidates.filter(c => hasStatus(c, 'Joined')).length;
+    const hold = scopedCandidates.filter(c => hasStatus(c, 'Hold')).length;
+    const rejected = scopedCandidates.filter(c => hasStatus(c, 'Rejected')).length;
 
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
-    const todaySubmissions = globalFilteredCandidates.filter(c => {
+    const todaySubmissions = scopedCandidates.filter(c => {
       const d = new Date(c.dateAdded || c.createdAt);
       return d >= todayStart && d <= todayEnd;
     }).length;
 
     return { total, submitted, joined, hold, rejected, todaySubmissions };
-  }, [globalFilteredCandidates]);
+  }, [scopedCandidates, hasStatus]);
 
-  const recruiterStats = useMemo(() => {
-    return recruiters
-      .filter(r => r._id || r.id)
-      .filter(r => {
-        if (recruiterFilter === 'All') return true;
-        const name = r.name || `${r.firstName || ''} ${r.lastName || ''}`.trim() || r.username;
-        return name === recruiterFilter;
-      })
-      .map(r => {
-        const rid = r._id || r.id;
-        const cands = globalFilteredCandidates.filter(c => (c.recruiterId?._id || c.recruiterId) === rid);
-        const name = r.name || `${r.firstName || ''} ${r.lastName || ''}`.trim();
-        return {
-          fullName: name,
-          candidates: cands,
-          submissions: cands.length,
-          joined: cands.filter(c => getSafeStatus(c.status) === 'joined').length,
-          pending: cands.filter(c => ['submitted', 'pending'].includes(getSafeStatus(c.status))).length,
-          hold: cands.filter(c => getSafeStatus(c.status) === 'hold').length,
-          rejected: cands.filter(c => getSafeStatus(c.status) === 'rejected').length,
-          selected: cands.filter(c => getSafeStatus(c.status) === 'selected').length,
-        };
-      })
-      .filter(r => r.fullName !== '')
-      .sort((a, b) => b.submissions - a.submissions);
-  }, [globalFilteredCandidates, recruiters, recruiterFilter]);
+  const scopedJobs = useMemo(() => {
+    if (recruiterFilter === 'All') return jobs;
+    const rec = recruiters.find(r => String(r._id || r.id) === recruiterFilter);
+    if (!rec) return jobs;
+    const recId = String(rec._id || rec.id);
+    const recName = `${rec.firstName || ''} ${rec.lastName || ''}`.trim().toLowerCase();
+    const recUsername = (rec.username || '').toLowerCase();
+    const recEmail = (rec.email || '').toLowerCase();
 
-  const performanceTotals = useMemo(() => recruiterStats.reduce((sum, r) => ({
-    submissions: sum.submissions + r.submissions,
-    hold: sum.hold + r.hold,
-    joined: sum.joined + r.joined,
-    rejected: sum.rejected + r.rejected,
-    pending: sum.pending + r.pending,
-  }), { submissions: 0, hold: 0, joined: 0, rejected: 0, pending: 0 }), [recruiterStats]);
-
-  const openPerformanceModal = useCallback((recruiter, type, label) => {
-    const list = recruiter.candidates.filter(c => {
-      const status = getSafeStatus(c.status);
-      if (type === 'submissions') return true;
-      if (type === 'pending') return ['submitted', 'pending'].includes(status);
-      return status === type;
+    return jobs.filter(j => {
+      const primary = String(j.primaryRecruiter || '').toLowerCase();
+      const secondary = String(j.secondaryRecruiter || '').toLowerCase();
+      const assigned = String(j.assignedRecruiter || j.recruiterId || '');
+      return assigned === recId || 
+             primary === recName || 
+             secondary === recName || 
+             primary === recUsername || 
+             secondary === recUsername || 
+             primary === recEmail || 
+             secondary === recEmail;
     });
-    setPerformanceModal({ title: `${label} - ${recruiter.fullName}`, candidates: list });
+  }, [jobs, recruiters, recruiterFilter]);
+
+  const avgTimeToHireDays = useMemo(() => {
+    const joinedCandidates = scopedCandidates.filter(c => hasStatus(c, 'Joined'));
+    if (joinedCandidates.length === 0) return 0;
+    const totalDays = joinedCandidates.reduce((sum, c) => {
+      const start = new Date(c.dateAdded || c.createdAt);
+      const end = new Date(c.statusChangedAt || new Date());
+      const diffTime = Math.max(0, end - start);
+      return sum + (diffTime / (1000 * 60 * 60 * 24));
+    }, 0);
+    return parseFloat((totalDays / joinedCandidates.length).toFixed(1));
+  }, [scopedCandidates, hasStatus]);
+
+  const getTrendForItems = useCallback((items, dateField = 'createdAt') => {
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+
+    const currentMonth = items.filter(item => new Date(item[dateField]) >= currentMonthStart).length;
+    const prevMonth = items.filter(item => {
+      const d = new Date(item[dateField]);
+      return d >= prevMonthStart && d <= prevMonthEnd;
+    }).length;
+
+    if (prevMonth > 0) return Math.round(((currentMonth - prevMonth) / prevMonth) * 100);
+    if (currentMonth > 0) return 100;
+    return 0;
   }, []);
 
-  const openTotalPerformanceModal = useCallback((type, label) => {
-    const allCandidates = recruiterStats.flatMap(r => r.candidates);
-    const list = allCandidates.filter(c => {
-      const status = getSafeStatus(c.status);
-      if (type === 'submissions') return true;
-      if (type === 'pending') return ['submitted', 'pending'].includes(status);
-      return status === type;
+  const trends = useMemo(() => {
+    return {
+      candidates: getTrendForItems(scopedCandidates, 'createdAt'),
+      recruiters: getTrendForItems(visibleRecruiters.filter(r => r.role === 'recruiter'), 'createdAt'),
+      jobs: getTrendForItems(scopedJobs, 'createdAt'),
+      todaySubmissions: getTrendForItems(scopedCandidates.filter(c => {
+        const d = new Date(c.dateAdded || c.createdAt);
+        return d.toDateString() === new Date().toDateString();
+      }), 'createdAt'),
+      submitted: getTrendForItems(scopedCandidates.filter(c => hasStatus(c, ['Submitted', 'Pending', 'Pipeline'])), 'createdAt'),
+      joined: getTrendForItems(scopedCandidates.filter(c => hasStatus(c, 'Joined')), 'createdAt'),
+      hold: getTrendForItems(scopedCandidates.filter(c => hasStatus(c, 'Hold')), 'createdAt'),
+      rejected: getTrendForItems(scopedCandidates.filter(c => hasStatus(c, 'Rejected')), 'createdAt'),
+    };
+  }, [scopedCandidates, visibleRecruiters, scopedJobs, getTrendForItems, hasStatus]);
+
+  const ratios = useMemo(() => {
+    const total = stats.total;
+
+    const active = scopedCandidates.filter(c => {
+      const s = String(c.status || '').trim().toLowerCase();
+      return !['rejected', 'backout', 'no show'].includes(s);
+    }).length;
+
+    const rTotal = visibleRecruiters.filter(r => r.role === 'recruiter').length;
+    const rActive = visibleRecruiters.filter(r => r.role === 'recruiter' && r.active !== false).length;
+
+    const jTotal = scopedJobs.length;
+    const jActive = scopedJobs.filter(j => j.active !== false).length;
+
+    const todayTarget = Math.max(10, stats.total * 0.02);
+    const todayPct = Math.min(100, Math.round((stats.todaySubmissions / todayTarget) * 100));
+
+    const pct = (count) => total > 0 ? Math.round((count / total) * 100) : 0;
+
+    return {
+      candidates: total > 0 ? Math.round((active / total) * 100) : 0,
+      recruiters:  rTotal > 0 ? Math.round((rActive / rTotal) * 100) : 0,
+      jobs:        jTotal > 0 ? Math.round((jActive / jTotal) * 100) : 0,
+      todaySubmissions: todayPct,
+      submitted:   pct(stats.submitted),
+      joined:      pct(stats.joined),
+      hold:        pct(stats.hold),
+      rejected:    pct(stats.rejected),
+    };
+  }, [stats, scopedCandidates, visibleRecruiters, scopedJobs]);
+
+  const recruiterStats = useMemo(() => {
+    let stats = visibleRecruiters
+      .filter(r => r._id || r.id)
+      .map(r => {
+        const rid = r._id || r.id;
+        let cands = candidates.filter(c => getCandidateRecruiterId(c) === String(rid));
+
+        if (tableStartDate) {
+          const start = new Date(tableStartDate);
+          start.setHours(0, 0, 0, 0);
+          cands = cands.filter(c => new Date(c.dateAdded || c.createdAt) >= start);
+        }
+        if (tableEndDate) {
+          const end = new Date(tableEndDate);
+          end.setHours(23, 59, 59, 999);
+          cands = cands.filter(c => new Date(c.dateAdded || c.createdAt) <= end);
+        }
+
+        const name = getRecruiterName(r);
+        return {
+          id: String(rid),
+          recruiter: r,
+          fullName: name,
+          submissions: cands.length,
+          joined: cands.filter(c => statusMatchesMetric(c, 'joined')).length,
+          pending: cands.filter(c => statusMatchesMetric(c, 'pending')).length,
+          hold: cands.filter(c => statusMatchesMetric(c, 'hold')).length,
+          rejected: cands.filter(c => statusMatchesMetric(c, 'rejected')).length,
+          selected: cands.filter(c => statusMatchesMetric(c, 'selected')).length,
+          avgTimeToHire: 0,
+        };
+      })
+      .filter(r => r.fullName !== '');
+
+    if (searchQuery.trim() !== '') {
+      const q = searchQuery.toLowerCase();
+      stats = stats.filter(r => r.fullName.toLowerCase().includes(q));
+    }
+
+    stats.sort((a, b) => {
+      let valA = a[sortField];
+      let valB = b[sortField];
+      if (typeof valA === 'string') {
+        return sortOrder === 'asc'
+          ? valA.localeCompare(valB)
+          : valB.localeCompare(valA);
+      } else {
+        return sortOrder === 'asc'
+          ? (valA || 0) - (valB || 0)
+          : (valB || 0) - (valA || 0);
+      }
     });
-    setPerformanceModal({ title: `${label} - All Recruiters`, candidates: list });
-  }, [recruiterStats]);
 
-  const CountButton = ({ value, className, onClick }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!value}
-      className={clsx("font-inherit hover:underline disabled:cursor-default disabled:no-underline disabled:opacity-60", className)}
-    >
-      {value}
-    </button>
-  );
+    return stats;
+  }, [candidates, visibleRecruiters, sortField, sortOrder, searchQuery, tableStartDate, tableEndDate]);
 
-  // ── FIX 12: barData updated to include Submissions, Selected, and Rejected ──
+  const recruiterTotals = useMemo(() => (
+    RECRUITER_PERFORMANCE_COLUMNS.reduce((totals, column) => {
+      totals[column.key] = recruiterStats.reduce((sum, row) => sum + (Number(row[column.key]) || 0), 0);
+      return totals;
+    }, {})
+  ), [recruiterStats]);
+
   const barData = useMemo(
-    () => recruiterStats.slice(0, 6).map(r => ({
-      name: r.fullName.split(' ')[0],
-      submissions: r.submissions,
-      joined: r.joined,
-      rejected: r.rejected
-    })),
+    () => [...recruiterStats]
+      .sort((a, b) => b.submissions - a.submissions)
+      .slice(0, 6)
+      .map(r => ({
+        name: r.fullName.split(' ')[0],
+        submissions: r.submissions,
+        selected: r.selected,
+        rejected: r.rejected
+      })),
     [recruiterStats]
   );
 
-  const [lineGraphView, setLineGraphView] = useState('month');
-  const [lineRecruiterFilter, setLineRecruiterFilter] = useState('All');
-
-  const recruiterNamesForLine = useMemo(() => {
-    const names = new Set();
-    globalFilteredCandidates.forEach(c => {
-      const name = getRecruiterNameOfCandidate(c);
-      if (name && name !== 'Unknown') names.add(name);
-    });
-    return Array.from(names).sort();
-  }, [candidates]);
-
-  const lineChartData = useMemo(() => {
-    let yearToUse = new Date().getFullYear();
-    const yearsWithData = new Set();
-    globalFilteredCandidates.forEach(c => {
-      const dateStr = c.dateAdded || c.createdAt;
-      if (dateStr) {
-        const y = new Date(dateStr).getFullYear();
-        if (!isNaN(y)) yearsWithData.add(y);
-      }
-    });
-    if (yearsWithData.size > 0) {
-      const sortedYears = Array.from(yearsWithData).sort((a, b) => b - a);
-      if (!yearsWithData.has(yearToUse)) {
-        yearToUse = sortedYears[0];
-      }
-    }
-
-    if (lineGraphView === 'month') {
-      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      return monthNames.map((monthName, mIndex) => {
-        const point = { name: `${monthName} (${yearToUse})` };
-        recruiterNamesForLine.forEach(rName => {
-          point[rName] = 0;
-        });
-        globalFilteredCandidates.forEach(c => {
-          const dateStr = c.dateAdded || c.createdAt;
-          if (dateStr) {
-            const date = new Date(dateStr);
-            if (date.getFullYear() === yearToUse && date.getMonth() === mIndex) {
-              const rName = getRecruiterNameOfCandidate(c);
-              if (rName !== 'Unknown' && recruiterNamesForLine.includes(rName)) {
-                point[rName] = (point[rName] || 0) + 1;
-              }
-            }
-          }
-        });
-        return point;
-      });
-    } else {
-      const years = Array.from(yearsWithData).sort();
-      if (years.length === 0) {
-        years.push(yearToUse);
-      }
-      return years.map(y => {
-        const point = { name: String(y) };
-        recruiterNamesForLine.forEach(rName => {
-          point[rName] = 0;
-        });
-        globalFilteredCandidates.forEach(c => {
-          const dateStr = c.dateAdded || c.createdAt;
-          if (dateStr) {
-            const date = new Date(dateStr);
-            if (date.getFullYear() === y) {
-              const rName = getRecruiterNameOfCandidate(c);
-              if (rName !== 'Unknown' && recruiterNamesForLine.includes(rName)) {
-                point[rName] = (point[rName] || 0) + 1;
-              }
-            }
-          }
-        });
-        return point;
-      });
-    }
-  }, [globalFilteredCandidates, lineGraphView, recruiterNamesForLine]);
-
-  const recruitersToDraw = useMemo(() => {
-    if (lineRecruiterFilter === 'All') return recruiterNamesForLine;
-    return [lineRecruiterFilter];
-  }, [lineRecruiterFilter, recruiterNamesForLine]);
-
   const filteredModalData = useMemo(() => {
     if (recruiterFilter === 'All') return modalData;
-    return modalData.filter(c => getRecruiterNameOfCandidate(c) === recruiterFilter);
+    return modalData.filter(c => getCandidateRecruiterId(c) === recruiterFilter);
   }, [modalData, recruiterFilter]);
 
-  // ── Stable handlers — useCallback so child onClick props don't change ref ────
+  const openPerformanceModal = useCallback((recruiterRow, column) => {
+    const rows = candidates.filter(candidate => (
+      getCandidateRecruiterId(candidate) === recruiterRow.id && statusMatchesMetric(candidate, column.key)
+    ));
+    setPerformanceModal({
+      title: `${recruiterRow.fullName} - ${column.label}`,
+      subtitle: `${column.label} candidates for ${recruiterRow.fullName}`,
+      rows,
+    });
+  }, [candidates]);
+
+  const openPerformanceTotalModal = useCallback((column) => {
+    const visibleRecruiterIds = new Set(recruiterStats.map(row => row.id));
+    const rows = candidates.filter(candidate => (
+      visibleRecruiterIds.has(getCandidateRecruiterId(candidate)) && statusMatchesMetric(candidate, column.key)
+    ));
+    setPerformanceModal({
+      title: `Total ${column.label}`,
+      subtitle: `${column.label} candidates across all recruiters in this table`,
+      rows,
+    });
+  }, [candidates, recruiterStats]);
+
   const openModal = useCallback(() => setIsModalOpen(true), []);
   const closeModal = useCallback(() => setIsModalOpen(false), []);
 
-  // ─── Render ───────────────────────────────────────────────────────────────────
+  const handleSort = useCallback((field) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('desc');
+    }
+  }, [sortField, sortOrder]);
+
+  const renderSortIcon = useCallback((field) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="w-3 h-3 ml-1 text-gray-400 opacity-60 inline-block" />;
+    }
+    if (sortOrder === 'asc') {
+      return <ArrowUp className="w-3 h-3 ml-1 text-[#283086] inline-block" />;
+    }
+    return <ArrowDown className="w-3 h-3 ml-1 text-[#283086] inline-block" />;
+  }, [sortField, sortOrder]);
+
   if (loading) return <FullPageSpinner />;
 
   const formattedDate = format(new Date(), 'dd MMM, yyyy').toUpperCase();
 
   return (
     <div className="max-w-[1600px] mx-auto space-y-8 relative">
-
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 bg-white/50 p-6 rounded-2xl border border-gray-100 shadow-sm">
         <div>
-          <h1 className="text-3xl font-bold text-[#283086] tracking-tight">Manager Dashboard</h1>
+          <h1 className="text-3xl font-bold text-[#283086] tracking-tight">Admin Dashboard</h1>
           <p className="text-gray-500 text-sm font-medium mt-1">
             Welcome back <span className="text-[#283086] font-bold">{currentUser?.firstName || 'Admin'}</span>, Have a nice day..!
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {/* Top Level Recruiter Filter */}
           <div className="relative group">
             <select
               value={recruiterFilter}
               onChange={(e) => setRecruiterFilter(e.target.value)}
               className="pl-4 pr-10 py-2.5 text-xs font-bold uppercase tracking-wider border border-gray-200 rounded-xl text-[#283086] focus:ring-4 focus:ring-blue-100 focus:outline-none bg-white appearance-none cursor-pointer shadow-sm transition-all hover:border-[#283086]"
             >
-              {RECRUITER_NAMES.map(name => (
-                <option key={name} value={name}>{name === 'All' ? '🗂️ All Recruiters' : `👤 ${name}`}</option>
+              <option value="All">All Recruiters</option>
+              {recruiterOptions.map(recruiter => (
+                <option key={recruiter.id} value={recruiter.id}>{recruiter.name}</option>
               ))}
             </select>
             <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 group-hover:text-[#283086] transition-colors">
-              <ChevronDown size={14} />
+              <Plus size={14} className="rotate-45" />
             </div>
           </div>
 
@@ -450,36 +585,37 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* ── Row 1: Summary Cards ── */}
+      {/* Row 1: Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <PrimaryStatCard
           title="Total Candidates"
           value={stats.total}
-          trend={12}
+          trend={trends.candidates}
+          progress={ratios.candidates}
           icon={Users}
           onClick={() => navigate('/admin/add-candidate', { state: { filter: 'All' } })}
         />
-        <BubbleStatCard title="Recruiters" value={recruiters.length} trend={5} icon={UserCheck} theme="green" onClick={() => navigate('/admin/recruiters')} />
-        <BubbleStatCard title="Total Jobs" value={jobs.length} trend={8} icon={Briefcase} theme="blue" onClick={() => navigate('/admin/requirements')} />
-        <BubbleStatCard title="Today Submissions" value={stats.todaySubmissions} trend={14} icon={ClipboardList} theme="purple" onClick={openModal} />
+        <BubbleStatCard title="Recruiters" value={visibleRecruiters.filter(r => r.role === 'recruiter').length} trend={trends.recruiters} progress={ratios.recruiters} icon={UserCheck} theme="green" onClick={() => navigate('/admin/recruiters')} />
+        <BubbleStatCard title="Total Jobs" value={scopedJobs.length} trend={trends.jobs} progress={ratios.jobs} icon={Briefcase} theme="blue" onClick={() => navigate('/admin/requirements')} />
+        <BubbleStatCard title="Today Submissions" value={stats.todaySubmissions} trend={trends.todaySubmissions} progress={ratios.todaySubmissions} icon={ClipboardList} theme="purple" onClick={openModal} />
       </div>
 
-      {/* ── Row 2: Status Cards ── */}
+      {/* Row 2: Status Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <BubbleStatCard title="Submitted" value={stats.submitted} trend={12} icon={User} theme="purple" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Submitted' } })} />
-        <BubbleStatCard title="Joined" value={stats.joined} trend={7} icon={UserCheck} theme="green" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Joined' } })} />
-        <BubbleStatCard title="Hold" value={stats.hold} trend={4} icon={PauseCircle} theme="orange" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Hold' } })} />
-        <BubbleStatCard title="Rejected" value={stats.rejected} trend={5} icon={UserX} theme="red" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Rejected' } })} />
+        <BubbleStatCard title="Submitted" value={stats.submitted} trend={trends.submitted} progress={ratios.submitted} icon={User} theme="purple" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Submitted' } })} />
+        <BubbleStatCard title="Joined" value={stats.joined} trend={trends.joined} progress={ratios.joined} icon={UserCheck} theme="green" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Joined' } })} />
+        <BubbleStatCard title="Hold" value={stats.hold} trend={trends.hold} progress={ratios.hold} icon={PauseCircle} theme="orange" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Hold' } })} />
+        <BubbleStatCard title="Rejected" value={stats.rejected} trend={trends.rejected} progress={ratios.rejected} icon={UserX} theme="red" onClick={() => navigate('/admin/add-candidate', { state: { filter: 'Rejected' } })} />
       </div>
 
-      {/* ── Row 3: Middle Cards ── */}
+      {/* Row 3: Middle Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-8 rounded-[1.5rem] shadow-sm border border-gray-100 flex items-center justify-between">
           <div className="flex-1">
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Avg. Time of Hire</p>
-            <h3 className="text-4xl font-bold text-slate-800 mt-2">0.0%</h3>
+            <h3 className="text-4xl font-bold text-slate-800 mt-2">{avgTimeToHireDays > 0 ? `${avgTimeToHireDays} Days` : '0.0 Days'}</h3>
             <div className="w-full h-2 bg-gray-100 rounded-full mt-6">
-              <div className="h-full bg-[#283086] rounded-full w-[30%]" />
+              <div className="h-full bg-[#283086] rounded-full transition-all duration-500" style={{ width: `${avgTimeToHireDays > 0 ? Math.max(10, Math.min(100, Math.round((1 - avgTimeToHireDays / 45) * 100))) : 0}%` }} />
             </div>
           </div>
           <div className="bg-blue-50 p-4 rounded-xl"><TrendingUp size={32} className="text-blue-600" /></div>
@@ -494,12 +630,16 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* ── Row 4: Chart ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white p-8 rounded-[1.5rem] shadow-sm border border-gray-100 min-w-0">
+      {/* Row 4: Charts */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="bg-white p-8 rounded-[1.5rem] shadow-sm border border-gray-100 h-full min-h-[460px] dark:border-white/10 dark:bg-slate-900">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-base font-bold text-slate-800">Top Recruiters (Upload Report)</h3>
-            <span className="text-xs text-gray-400">showing {Math.min(6, recruiters.length)} of {recruiters.length}</span>
+            <h3 className="text-base font-bold text-slate-800 dark:text-white">Top Recruiters (Upload Report)</h3>
+            <span className="text-xs text-gray-400">
+              {recruiterFilter === 'All'
+                ? `showing ${Math.min(6, recruiterStats.length)} of ${recruiterStats.length}`
+                : selectedRecruiterName}
+            </span>
           </div>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
@@ -509,145 +649,157 @@ export default function AdminDashboard() {
                 <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => `${v}`} />
                 <Tooltip
                   cursor={{ fill: '#f8fafc', radius: 8 }}
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '8px 12px', fontSize: '11px' }}
-                  itemStyle={{ fontSize: '11px', padding: '2px 0' }}
-                  labelStyle={{ fontSize: '11px', fontWeight: 'bold', marginBottom: '4px', color: '#6b7280' }}
+                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
                 />
                 <Bar dataKey="submissions" name="Total" fill="#5664d2" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="joined" name="Joined" fill="#10b981" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="selected" name="Selected" fill="#10b981" radius={[6, 6, 0, 0]} />
                 <Bar dataKey="rejected" name="Rejected" fill="#f43f5e" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="bg-white p-8 rounded-[1.5rem] shadow-sm border border-gray-100 flex flex-col justify-between min-w-0">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
-            <h3 className="text-base font-bold text-slate-800">Candidate Count</h3>
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Recruiter Selector Dropdown for Line Chart */}
-              <select
-                value={lineRecruiterFilter}
-                onChange={(e) => setLineRecruiterFilter(e.target.value)}
-                className="pl-3 pr-8 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer bg-white"
-              >
-                <option value="All">All Recruiters</option>
-                {recruiterNamesForLine.map(name => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
-              </select>
-
-              {/* Month/Year View Selector Dropdown */}
-              <select
-                value={lineGraphView}
-                onChange={(e) => setLineGraphView(e.target.value)}
-                className="pl-3 pr-8 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer bg-white"
-              >
-                <option value="month">Month wise</option>
-                <option value="year">Year wise</option>
-              </select>
-            </div>
-          </div>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={lineChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                <Tooltip
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '8px 12px', fontSize: '11px' }}
-                  itemStyle={{ fontSize: '11px', padding: '2px 0' }}
-                  labelStyle={{ fontSize: '11px', fontWeight: 'bold', marginBottom: '4px', color: '#6b7280' }}
-                />
-                {recruitersToDraw.map((rName, idx) => {
-                  const colors = ['#5664d2', '#10b981', '#f43f5e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6', '#f97316', '#6366f1'];
-                  const strokeColor = colors[idx % colors.length];
-                  return (
-                    <Line
-                      key={rName}
-                      type="monotone"
-                      dataKey={rName}
-                      name={rName}
-                      stroke={strokeColor}
-                      strokeWidth={3}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 6 }}
-                    />
-                  );
-                })}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+        <RecruiterCandidateGrowthChart
+          candidates={candidates}
+          recruiters={recruiters}
+          loading={loading}
+        />
       </div>
 
-      {/* ── Row 5: Table ── */}
+      {/* Row 5: Table */}
       <div className="bg-white rounded-[1.5rem] shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-8 py-6 flex justify-between items-center bg-[#f8faff] border-b border-gray-100">
+        <div className="px-8 py-6 flex justify-between items-center bg-[#f8faff] border-b border-gray-100 flex-wrap gap-4">
           <h3 className="text-base font-bold text-slate-800">Recruiter Performance Details</h3>
-          <button onClick={() => navigate('/admin/recruiters')} className="bg-[#283086] text-white px-5 py-2.5 rounded text-xs font-bold uppercase tracking-wide hover:bg-blue-900 shadow-lg">
-            View All Recruiters
-          </button>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex items-center">
+              <input
+                type="text"
+                placeholder="Search recruiter..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-8 pr-4 py-2.5 text-xs border border-gray-200 rounded-lg text-slate-700 font-medium focus:ring-2 focus:ring-[#283086] focus:outline-none w-48 bg-white"
+              />
+              <Search className="absolute left-2.5 w-3.5 h-3.5 text-gray-400" />
+            </div>
+
+            <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 shadow-sm text-[11px] text-slate-600 font-semibold">
+              <input
+                type="date"
+                value={tableStartDate}
+                onChange={(e) => setTableStartDate(e.target.value)}
+                className="border-none focus:outline-none bg-transparent text-slate-700 w-28 cursor-pointer"
+                title="Start Date"
+              />
+              <span className="text-gray-400 font-normal">to</span>
+              <input
+                type="date"
+                value={tableEndDate}
+                onChange={(e) => setTableEndDate(e.target.value)}
+                className="border-none focus:outline-none bg-transparent text-slate-700 w-28 cursor-pointer"
+                title="End Date"
+              />
+              {(tableStartDate || tableEndDate) && (
+                <button
+                  onClick={() => { setTableStartDate(''); setTableEndDate(''); }}
+                  className="text-gray-400 hover:text-red-500 ml-1 transition-colors"
+                  title="Clear Date Range"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <button onClick={() => navigate('/admin/recruiters')} className="bg-[#283086] text-white px-5 py-2.5 rounded text-xs font-bold uppercase tracking-wide hover:bg-blue-900 shadow-lg whitespace-nowrap">
+              View All Recruiters
+            </button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-[#f8faff] text-gray-500 font-bold uppercase text-[10px] tracking-widest border-b border-gray-100">
               <tr>
-                <th className="px-8 py-5 text-left">Recruiter</th>
-                <th className="px-4 py-5 text-center">Submissions</th>
-                <th className="px-4 py-5 text-center">Hold</th>
-                <th className="px-4 py-5 text-center">Joined</th>
-                <th className="px-4 py-5 text-center">Rejected</th>
-                <th className="px-4 py-5 text-center">Pending</th>
-                <th className="px-8 py-5 text-right">Avg. Time to Hire</th>
+                <th
+                  className="px-8 py-5 text-left cursor-pointer select-none hover:text-slate-800 transition-colors"
+                  onClick={() => handleSort('fullName')}
+                >
+                  <div className="flex items-center gap-1">
+                    <span>Recruiter</span>
+                    {renderSortIcon('fullName')}
+                  </div>
+                </th>
+                {RECRUITER_PERFORMANCE_COLUMNS.map((column) => (
+                  <th
+                    key={column.key}
+                    className="px-4 py-5 text-center cursor-pointer select-none hover:text-slate-800 transition-colors"
+                    onClick={() => handleSort(column.key)}
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>{column.label}</span>
+                      {renderSortIcon(column.key)}
+                    </div>
+                  </th>
+                ))}
+                <th
+                  className="px-8 py-5 text-right cursor-pointer select-none hover:text-slate-800 transition-colors"
+                  onClick={() => handleSort('avgTimeToHire')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    <span>Avg. Time to Hire</span>
+                    {renderSortIcon('avgTimeToHire')}
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50 bg-white">
               {recruiterStats.map((r, i) => (
                 <tr key={r.fullName || i} className="hover:bg-blue-50/30">
-                  <td className="px-8 py-5 font-bold text-slate-700">{r.fullName}</td>
-                  <td className="px-4 py-5 text-center text-blue-600 font-black">
-                    <CountButton value={r.submissions} onClick={() => openPerformanceModal(r, 'submissions', 'Submissions')} />
+                  <td className="px-8 py-5 font-bold text-slate-700">
+                    <RecruiterDetailsTrigger recruiter={r.recruiter} className="text-slate-700 font-bold">
+                      {r.fullName}
+                    </RecruiterDetailsTrigger>
                   </td>
-                  <td className="px-4 py-5 text-center text-orange-400 font-bold">
-                    <CountButton value={r.hold} onClick={() => openPerformanceModal(r, 'hold', 'Hold')} />
-                  </td>
-                  <td className="px-4 py-5 text-center text-green-600 font-black">
-                    <CountButton value={r.joined} onClick={() => openPerformanceModal(r, 'joined', 'Joined')} />
-                  </td>
-                  <td className="px-4 py-5 text-center text-red-500 font-medium">
-                    <CountButton value={r.rejected} onClick={() => openPerformanceModal(r, 'rejected', 'Rejected')} />
-                  </td>
-                  <td className="px-4 py-5 text-center text-gray-400 font-medium">
-                    <CountButton value={r.pending} onClick={() => openPerformanceModal(r, 'pending', 'Pending')} />
-                  </td>
+                  {RECRUITER_PERFORMANCE_COLUMNS.map((column) => (
+                    <td key={column.key} className="px-4 py-5 text-center">
+                      <RecruiterMetricButton
+                         value={r[column.key]}
+                         className={column.className}
+                         onClick={() => openPerformanceModal(r, column)}
+                       />
+                    </td>
+                  ))}
                   <td className="px-8 py-5 text-right font-black text-red-500">0.0%</td>
                 </tr>
               ))}
-              {recruiterStats.length > 0 && (
-                <tr className="bg-[#f8faff] border-t border-gray-100">
-                  <td className="px-8 py-4 font-black text-slate-800">Total</td>
-                  <td className="px-4 py-4 text-center text-blue-700 font-black"><CountButton value={performanceTotals.submissions} onClick={() => openTotalPerformanceModal('submissions', 'Total Submissions')} /></td>
-                  <td className="px-4 py-4 text-center text-orange-500 font-black"><CountButton value={performanceTotals.hold} onClick={() => openTotalPerformanceModal('hold', 'Total Hold')} /></td>
-                  <td className="px-4 py-4 text-center text-green-700 font-black"><CountButton value={performanceTotals.joined} onClick={() => openTotalPerformanceModal('joined', 'Total Joined')} /></td>
-                  <td className="px-4 py-4 text-center text-red-600 font-black"><CountButton value={performanceTotals.rejected} onClick={() => openTotalPerformanceModal('rejected', 'Total Rejected')} /></td>
-                  <td className="px-4 py-4 text-center text-gray-600 font-black"><CountButton value={performanceTotals.pending} onClick={() => openTotalPerformanceModal('pending', 'Total Pending')} /></td>
-                  <td className="px-8 py-4 text-right font-black text-red-500">0.0%</td>
-                </tr>
-              )}
               {recruiterStats.length === 0 && (
                 <tr><td colSpan="7" className="p-8 text-center text-gray-400">No active recruiter data available</td></tr>
               )}
             </tbody>
+            {recruiterStats.length > 0 && (
+              <tfoot className="bg-[#f8faff] border-t border-gray-100">
+                <tr>
+                  <td className="px-8 py-5 font-black text-slate-800">Total</td>
+                  {RECRUITER_PERFORMANCE_COLUMNS.map((column) => (
+                    <td key={column.key} className="px-4 py-5 text-center">
+                      <RecruiterMetricButton
+                        value={recruiterTotals[column.key] || 0}
+                        className={column.className}
+                        onClick={() => openPerformanceTotalModal(column)}
+                      />
+                    </td>
+                  ))}
+                  <td className="px-8 py-5 text-right font-black text-red-500">0.0%</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </div>
 
-      {/* ── MODAL: Day Submissions ── */}
+      {/* MODAL: Day Submissions */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden">
-
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={closeModal} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden">
             {/* Modal Header */}
             <div className="px-6 py-4 border-b border-gray-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-[#f8faff]">
               <div>
@@ -656,7 +808,7 @@ export default function AdminDashboard() {
                   Day Submissions
                 </h2>
                 <p className="text-xs text-gray-500 font-medium mt-1">
-                  Viewing candidates submitted by {recruiterFilter === 'All' ? 'all recruiters' : recruiterFilter}
+                  Viewing candidates submitted by {selectedRecruiterName}
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -665,8 +817,9 @@ export default function AdminDashboard() {
                   onChange={(e) => setRecruiterFilter(e.target.value)}
                   className="pl-3 pr-8 py-2 text-sm border border-gray-200 rounded-lg text-slate-700 font-medium focus:ring-2 focus:ring-[#283086] focus:outline-none bg-white appearance-none cursor-pointer"
                 >
-                  {RECRUITER_NAMES.map(name => (
-                    <option key={name} value={name}>{name === 'All' ? 'All Recruiters' : name}</option>
+                  <option value="All">All Recruiters</option>
+                  {recruiterOptions.map(recruiter => (
+                    <option key={recruiter.id} value={recruiter.id}>{recruiter.name}</option>
                   ))}
                 </select>
                 <div className="relative flex items-center">
@@ -700,48 +853,59 @@ export default function AdminDashboard() {
                   <h3 className="text-slate-800 font-bold">No submissions found</h3>
                   <p className="text-sm text-gray-500 mt-1">
                     {recruiterFilter !== 'All'
-                      ? `No candidates submitted by ${recruiterFilter} on ${filterDate}`
+                      ? `No candidates submitted by ${selectedRecruiterName} on ${filterDate}`
                       : `No candidates were added on ${filterDate}`}
                   </p>
                 </div>
               ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-[#f8faff] text-gray-500 font-bold uppercase text-[10px] tracking-widest border-b border-gray-100 sticky top-0 z-10 shadow-sm">
-                    <tr>
-                      <th className="px-6 py-4 text-left">Candidate ID</th>
-                      <th className="px-6 py-4 text-left">Candidate Name</th>
-                      <th className="px-6 py-4 text-left">Recruiter</th>
-                      <th className="px-6 py-4 text-left">Position</th>
-                      <th className="px-6 py-4 text-left">Client</th>
-                      <th className="px-6 py-4 text-center">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {filteredModalData.map((c) => {
-                      const rec = c.recruiterId;
-                      const recruiterName = rec
-                        ? (typeof rec === 'object'
-                          ? `${rec.firstName || rec.name || ''} ${rec.lastName || ''}`.trim() || rec.username || 'Unknown'
-                          : 'Unknown')
-                        : (c.recruiterName || 'Unknown');
-                      const cStatus = Array.isArray(c.status) ? c.status[0] : c.status;
-                      return (
-                        <tr key={c._id} className="hover:bg-purple-50/30">
-                          <td className="px-6 py-4 font-bold text-[#283086]">{c.candidateId || 'N/A'}</td>
-                          <td className="px-6 py-4 font-semibold text-slate-800">{c.name || `${c.firstName} ${c.lastName}`}</td>
-                          <td className="px-6 py-4 font-medium text-gray-600">{recruiterName}</td>
-                          <td className="px-6 py-4 text-gray-500">{c.position || '-'}</td>
-                          <td className="px-6 py-4 text-gray-500">{c.client || '-'}</td>
-                          <td className="px-6 py-4 text-center">
-                            <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
-                              {cStatus || 'SUBMITTED'}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <div className="overflow-x-auto w-full">
+                  <table className="w-full text-sm min-w-[800px]">
+                    <thead className="bg-[#f8faff] text-gray-500 font-bold uppercase text-[10px] tracking-widest border-b border-gray-100 sticky top-0 z-10 shadow-sm">
+                      <tr>
+                        <th className="px-6 py-4 text-left">Candidate ID</th>
+                        <th className="px-6 py-4 text-left">Candidate Name</th>
+                        <th className="px-6 py-4 text-left">Recruiter</th>
+                        <th className="px-6 py-4 text-left">Position</th>
+                        <th className="px-6 py-4 text-left">Client</th>
+                        <th className="px-6 py-4 text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {filteredModalData.map((c) => {
+                        const rec = c.recruiterId;
+                        const recruiterName = rec
+                          ? (typeof rec === 'object'
+                            ? `${rec.firstName || rec.name || ''} ${rec.lastName || ''}`.trim() || rec.username || 'Unknown'
+                            : 'Unknown')
+                          : (c.recruiterName || 'Unknown');
+                        const recruiterDetails = typeof rec === 'object' ? rec : { name: recruiterName };
+                        const cStatus = Array.isArray(c.status) ? c.status[0] : c.status;
+                        return (
+                          <tr key={c._id} className="hover:bg-purple-50/30">
+                            <td className="px-6 py-4 font-bold text-[#283086]">{c.candidateId || 'N/A'}</td>
+                            <td className="px-6 py-4">
+                              <CandidateProfileLink candidate={c} className="text-slate-800">
+                                {c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim() || 'Unknown Candidate'}
+                              </CandidateProfileLink>
+                            </td>
+                            <td className="px-6 py-4 font-medium text-gray-600">
+                              <RecruiterDetailsTrigger recruiter={recruiterDetails} className="text-gray-600 font-medium">
+                                {recruiterName}
+                              </RecruiterDetailsTrigger>
+                            </td>
+                            <td className="px-6 py-4 text-gray-500">{c.position || '-'}</td>
+                            <td className="px-6 py-4 text-gray-500">{c.client || '-'}</td>
+                            <td className="px-6 py-4 text-center">
+                              <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                                {cStatus || 'SUBMITTED'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
 
@@ -750,7 +914,7 @@ export default function AdminDashboard() {
               <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex justify-between items-center text-xs font-medium text-gray-500">
                 <p>
                   Showing {filteredModalData.length} submission(s) for the selected date
-                  {recruiterFilter !== 'All' && <span> · <span className="text-purple-600 font-semibold">{recruiterFilter}</span></span>}
+                  {recruiterFilter !== 'All' && <span> · <span className="text-purple-600 font-semibold">{selectedRecruiterName}</span></span>}
                 </p>
                 <button onClick={closeModal} className="text-slate-700 hover:text-[#283086] font-bold uppercase tracking-wider">
                   Close Window
@@ -761,72 +925,10 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {performanceModal && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center gap-4 bg-[#f8faff]">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                  <Users className="w-5 h-5 text-[#283086]" />
-                  {performanceModal.title}
-                </h2>
-                <p className="text-xs text-gray-500 font-medium mt-1">
-                  Total: {performanceModal.candidates.length} candidate{performanceModal.candidates.length !== 1 ? 's' : ''}
-                </p>
-              </div>
-              <button onClick={() => setPerformanceModal(null)} className="p-2 bg-gray-100 hover:bg-red-50 hover:text-red-500 rounded-full">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto bg-white">
-              {performanceModal.candidates.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-64 text-center">
-                  <div className="bg-gray-50 p-4 rounded-full mb-3">
-                    <ClipboardList className="w-8 h-8 text-gray-400" />
-                  </div>
-                  <h3 className="text-slate-800 font-bold">No candidates found</h3>
-                </div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-[#f8faff] text-gray-500 font-bold uppercase text-[10px] tracking-widest border-b border-gray-100 sticky top-0 z-10">
-                    <tr>
-                      <th className="px-6 py-4 text-left">Candidate ID</th>
-                      <th className="px-6 py-4 text-left">Candidate Name</th>
-                      <th className="px-6 py-4 text-left">Position</th>
-                      <th className="px-6 py-4 text-left">Client</th>
-                      <th className="px-6 py-4 text-center">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {performanceModal.candidates.map((c) => {
-                      const cStatus = Array.isArray(c.status) ? c.status[c.status.length - 1] : c.status;
-                      return (
-                        <tr key={c._id || c.id} className="hover:bg-blue-50/30">
-                          <td className="px-6 py-4 font-bold text-[#283086]">{c.candidateId || 'N/A'}</td>
-                          <td className="px-6 py-4 font-semibold text-slate-800">{c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim() || '-'}</td>
-                          <td className="px-6 py-4 text-gray-500">{c.position || '-'}</td>
-                          <td className="px-6 py-4 text-gray-500">{c.client || '-'}</td>
-                          <td className="px-6 py-4 text-center">
-                            <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
-                              {cStatus || 'Submitted'}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-            <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex justify-end">
-              <button onClick={() => setPerformanceModal(null)} className="text-slate-700 hover:text-[#283086] font-bold uppercase tracking-wider text-xs">
-                Close Window
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      <RecruiterPerformanceModal
+        detail={performanceModal}
+        onClose={() => setPerformanceModal(null)}
+      />
     </div>
   );
 }

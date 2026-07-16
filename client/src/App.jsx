@@ -57,6 +57,7 @@ const RecruiterSchedules = lazy(() => import('@/pages/RecruiterSchedules'));
 const MessagesRecruiters = lazy(() => import('@/pages/MessagesRecruiters'));
 const RecruiterReports = lazy(() => import('@/pages/RecruiterReports'));
 const RecruiterProfile = lazy(() => import('@/pages/RecruiterProfile'));
+const CandidateProfile = lazy(() => import('@/pages/CandidateProfile'));
 
 const LoadingFallback = () => (
   <div className="min-h-screen flex flex-col items-center justify-center bg-white">
@@ -150,6 +151,7 @@ function AppRoutes() {
         }>
           <Route index element={userRole === 'manager' ? <ManagerDashboard /> : <AdminDashboard />} />
           <Route path="add-candidate" element={<AddCandidate />} />
+          <Route path="candidates/:candidateId" element={<CandidateProfile />} />
           <Route path="my-candidates" element={<RecruiterCandidates />} />
           <Route path="recruiters" element={<AdminRecruiters />} />
           <Route path="clients" element={<AdminClientInfo />} />
@@ -171,6 +173,7 @@ function AppRoutes() {
         }>
           <Route index element={<RecruiterDashboard />} />
           <Route path="candidates" element={<RecruiterCandidates />} />
+          <Route path="candidates/:candidateId" element={<CandidateProfile />} />
           <Route path="assignments" element={<RecruiterAssignments />} />
           <Route path="schedules" element={<RecruiterSchedules />} />
           <Route path="messages" element={<MessagesRecruiters />} />

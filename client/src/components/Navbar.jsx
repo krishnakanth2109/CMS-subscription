@@ -374,9 +374,6 @@ export default function Navbar() {
 
             {/* Right Side: User Profile Trigger */}
             <div className="hidden lg:flex items-center gap-4 shrink-0">
-              <div className="flex items-center">
-                {renderRoleBadge()}
-              </div>
 
               {/* User Profile Circle Dropdown */}
               <div className="relative" ref={dropdownRef}>
@@ -388,7 +385,13 @@ export default function Navbar() {
                     <div className="flex items-center mb-1">
                       <span className="text-white font-bold text-sm leading-none">{currentUser?.name || 'User'}</span>
                     </div>
-                    <span className="text-white/60 text-[11px] leading-none max-w-[150px] truncate">{currentUser?.email}</span>
+                    <span className="text-amber-300 text-[9.5px] uppercase font-bold tracking-wider leading-none max-w-[150px] truncate">
+                      {userRole === 'manager' ? 'ADMIN ACCOUNT' :
+                       userRole === 'admin' ? 'MANAGER ACCOUNT' :
+                       userRole === 'recruiter' ? 'RECRUITER' :
+                       userRole === 'master' ? 'MASTER ADMIN' :
+                       String(userRole || '').toUpperCase()}
+                    </span>
                   </div>
 
                   <div className="relative shrink-0">

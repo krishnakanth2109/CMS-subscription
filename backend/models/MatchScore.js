@@ -20,7 +20,7 @@ const matchScoreSchema = mongoose.Schema({
   },
   candidateUpdatedAt: { type: Date },
   requirementUpdatedAt: { type: Date },
-  source: { type: String, enum: ['gemini', 'fallback', 'cache'], default: 'fallback' },
+  source: { type: String, default: 'fallback' },
   result: {
     type: mongoose.Schema.Types.Mixed,
     required: true,

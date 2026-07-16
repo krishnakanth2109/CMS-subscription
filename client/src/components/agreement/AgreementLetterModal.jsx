@@ -138,19 +138,40 @@ const EditableContent = ({ initialContent, onChange }) => {
 };
 
 const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
-    const { getIdToken } = useAuth();
     const API_URL = apiUrl;
-    const [letterType, setLetterType] = useState('Agreement');
+    const { authHeaders } = useAuth();
+    const [letterType, setLetterType] = useState(employee.templateName || 'Agreement');
     const [generatedContent, setGeneratedContent] = useState('');
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState('pdf');
 
-    const [selectedTemplate, setSelectedTemplate] = useState('/Vagerious.pdf');
-    const [companyName, setCompanyName] = useState('VAGARIOUS SOLUTIONS PRIVATE LIMITED');
+    const [selectedTemplate, setSelectedTemplate] = useState(employee.templateUrl || '/Vagerious.pdf');
+    const [companyName, setCompanyName] = useState(employee.name?.toUpperCase() || 'VAGARIOUS SOLUTIONS PRIVATE LIMITED');
+    const [templates, setTemplates] = useState([]);
 
     const prevTemplateRef = React.useRef(selectedTemplate);
     const prevCompanyNameRef = React.useRef(companyName);
     const contentRef = React.useRef(generatedContent);
+
+    // Fetch custom templates
+    useEffect(() => {
+        const fetchTemplates = async () => {
+            try {
+                const res = await fetch(`${API_URL}/upload/templates`, {
+                    headers: {
+                        ...(await authHeaders())
+                    }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setTemplates(data || []);
+                }
+            } catch (err) {
+                console.error("Error fetching templates:", err);
+            }
+        };
+        fetchTemplates();
+    }, [API_URL, authHeaders]);
 
     useEffect(() => {
         contentRef.current = generatedContent;
@@ -167,29 +188,44 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
         if (!file) return;
         const formData = new FormData();
         formData.append('file', file);
+        const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
+        formData.append('name', baseName);
+        
         try {
             setLoading(true);
-            const token = await getIdToken();
-            const res = await fetch(`${API_URL}/upload/template-pdf`, {
+            const headers = {
+                ...(await authHeaders())
+            };
+            const res = await fetch(`${API_URL}/upload/templates`, {
                 method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${token}`
-                },
+                headers,
                 body: formData
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || "Upload failed");
-            setSelectedTemplate(data.url);
+            
+            // Re-fetch templates list
+            const listRes = await fetch(`${API_URL}/upload/templates`, {
+                headers: {
+                    ...(await authHeaders())
+                }
+            });
+            if (listRes.ok) {
+                const listData = await listRes.json();
+                setTemplates(listData || []);
+            }
+            
+            setSelectedTemplate(data.template.url);
+            setLetterType(data.template.name);
 
-            let parsedName = data.filename.replace(/\.pdf\.jpg$|\.jpg$|\.png$/i, '');
+            let parsedName = data.template.name;
             parsedName = parsedName.replace(/_Offer_Letter_Background|_Offer_Letter|_Agreement|_Template|_Background/gi, '');
             parsedName = parsedName.replace(/_/g, ' ').trim();
-            // Do not override company name implicitly if they uploaded custom template unless it's empty
             if (parsedName && !companyName) {
                 setCompanyName(parsedName);
             }
 
-            alert(`Custom Template Uploaded! \n${data.filename}`);
+            alert(`Custom Template Uploaded! \n${data.template.name}`);
         } catch (err) {
             console.error(err);
             alert("Upload failed: " + err.message);
@@ -249,13 +285,13 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
         setLoading(true);
         setPdfUrl(null);
         try {
-            const token = await getIdToken();
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(await authHeaders())
+            };
             const res = await fetch(`${API_URL}/agreement-letters/generate`, {
                 method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`
-                },
+                headers,
                 body: JSON.stringify({
                     employee_id: employee.id,
                     letter_type: letterType,
@@ -264,8 +300,7 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
                 })
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "Generation failed");
-            
+            if (!res.ok) throw new Error(data.detail || "Draft generation failed.");
             setGeneratedContent(data.content);
             setLoading(false);
             await generatePreview(data.content);
@@ -306,13 +341,13 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
         if (btn) { btn.innerText = 'Processing...'; btn.disabled = true; }
 
         try {
-            const token = await getIdToken();
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(await authHeaders())
+            };
             const res = await fetch(`${API_URL}/agreement-letters/download-docx`, {
                 method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`
-                },
+                headers,
                 body: JSON.stringify({
                     html_content: generatedContent
                 })
@@ -348,14 +383,14 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
         btn.disabled = true;
 
         try {
-            const token = await getIdToken();
             const subject = `${letterType} - ${employee.name}`;
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(await authHeaders())
+            };
             const res = await fetch(`${API_URL}/agreement-email/send`, {
                 method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`
-                },
+                headers,
                 body: JSON.stringify({
                     employee_id: employee.id,
                     letter_content: generatedContent,
@@ -443,24 +478,35 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
                     />
 
                     <select
-                        value={letterType}
-                        onChange={(e) => setLetterType(e.target.value)}
+                        value={selectedTemplate}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            setSelectedTemplate(val);
+                            if (val === '/Vagerious.pdf') {
+                                setLetterType('Agreement');
+                            } else if (employee.templateUrl && val === employee.templateUrl) {
+                                setLetterType(employee.templateName || 'Agreement');
+                            } else {
+                                const t = templates.find(temp => temp.url === val);
+                                if (t) {
+                                    setLetterType(t.name);
+                                }
+                            }
+                        }}
                         style={{
                             padding: '10px 14px', borderRadius: '8px', background: '#f8fafc',
-                            color: '#0f172a', border: '1px solid #e2e8f0', flex: '1 1 120px', fontSize: '0.9rem', outline: 'none'
+                            color: '#0f172a', border: '1px solid #e2e8f0', flex: '1 1 220px', fontSize: '0.9rem', outline: 'none',
+                            fontWeight: '600'
                         }}
                     >
-                        <option>Agreement</option>
+                        {employee.templateUrl && (
+                            <option value={employee.templateUrl}>{employee.templateName || "Client Template"}</option>
+                        )}
+                        <option value="/Vagerious.pdf">Vagarious Template</option>
+                        {templates.map(tpl => (
+                            <option key={tpl.id} value={tpl.url}>{tpl.name}</option>
+                        ))}
                     </select>
-
-                    {/* Template selection replaced with fixed Vagerious implicitly */}
-                    <div style={{
-                        padding: '10px 14px', borderRadius: '8px', background: '#eef2ff',
-                        color: '#283086', border: '1px solid #c7d2fe', fontWeight: 'bold', fontSize: '0.9rem',
-                        display: 'flex', alignItems: 'center'
-                    }}>
-                        Vagarious Template
-                    </div>
 
                     <input type="file" accept="application/pdf" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCustomTemplateUpload} />
                     <button
@@ -490,16 +536,16 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
                 </div>
 
                 {/* SPLIT SCREEN area */}
-                <div style={{ flex: 1, display: 'flex', gap: '1rem', overflow: 'hidden', minHeight: 0 }}>
+                <div className="flex-1 flex flex-col lg:flex-row gap-4 overflow-y-auto lg:overflow-hidden min-h-0">
 
                     {!generatedContent && !loading && (
-                        <div style={{ flex: 1, background: 'white', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', border: '2px dashed #e2e8f0' }}>
-                            <p style={{ fontSize: '1.1rem' }}>Choose a template and click <b>Generate</b> to begin mapping the future.</p>
+                        <div style={{ flex: 1, minHeight: '300px', background: 'white', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', border: '2px dashed #e2e8f0' }}>
+                            <p style={{ fontSize: '1.1rem', textAlign: 'center', padding: '1rem' }}>Choose a template and click <b>Generate</b> to begin mapping the future.</p>
                         </div>
                     )}
 
                     {loading && (
-                        <div style={{ flex: 1, background: 'white', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#283086' }}>
+                        <div style={{ flex: 1, minHeight: '300px', background: 'white', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#283086' }}>
                             <div style={{ width: '50px', height: '50px', border: '5px solid #e2e8f0', borderTop: '5px solid #283086', borderRadius: '50%', animation: 'ag-spin 1s linear infinite' }} />
                             <style>{`@keyframes ag-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
                             <p style={{ marginTop: '1.5rem', fontWeight: 600 }}>Synthesizing professional document...</p>
@@ -507,7 +553,7 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
                     )}
 
                     {generatedContent && !loading && (
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+                        <div className="flex-1 flex flex-col min-w-0 min-h-[450px] lg:min-h-0">
                             <div style={{ marginBottom: '0.4rem', color: '#334155', fontSize: '0.85rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <Pencil size={14} /> Rich Text Editor <span style={{ fontSize: '0.8em', color: '#64748b' }}>(Auto-Syncing)</span>
                             </div>
@@ -518,9 +564,9 @@ const AgreementLetterModal = ({ employee, onClose, onSuccess, apiUrl }) => {
                     )}
 
                     {generatedContent && !loading && (
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+                        <div className="flex-1 flex flex-col min-w-0 min-h-[450px] lg:min-h-0">
                             <div style={{ marginBottom: '0.4rem', color: '#334155', fontSize: '0.85rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', justifyContent: 'space-between' }}>
-                                <span>📄 PDF Synchronizer (75%)</span>
+                                <span>📄 PDF Preview (75%)</span>
                                 {isGeneratingPdf && <span style={{ color: '#283086', animation: 'pulse 1s infinite' }}>● Syncing</span>}
                             </div>
                             <div style={{ flex: 1, background: '#525659', borderRadius: '12px', overflow: 'hidden', border: '1px solid #e2e8f0', position: 'relative' }}>
